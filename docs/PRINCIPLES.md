@@ -1,7 +1,35 @@
 # house_md — guiding principles
 
-This document explains the decisions that shape [`PLAN-V2.md`](./PLAN-V2.md). It is
+This document explains the product and decisions that shape [`PLAN.md`](./PLAN.md). It is
 the reference for resolving ambiguity during implementation.
+
+## Product definition
+
+house_md gives a clinician a council of argumentative peers for patient-specific
+differential reasoning and feasible care planning. It is an evidence-grounded clinical
+reasoning workspace that argues from the patient's actual record and carries the
+clinician's decision through coverage reality into standards-based proposed care.
+
+The primary user is a clinician presenting and reviewing one synthetic case. Judges
+are the secondary audience: they must understand the workflow and each integration on
+a projected display without operating the product.
+
+The primary surface is the **Living Differential Canvas**, a spatial workspace where
+retrieved evidence visibly supports or contradicts competing hypotheses. Conversation
+drives the artifact but does not dominate the interface.
+
+The product should feel calm, precise, and credible: a focused clinical instrument in
+a bright conference room. It must not resemble a legacy EHR, generic chatbot,
+autonomous diagnostic system, sponsor-logo dashboard, or theatrical dark-mode AI demo.
+
+Experience principles:
+
+1. Make the evolving clinical artifact, not chat, the center of gravity.
+2. Attach visible provenance to every patient-specific claim.
+3. Preserve clinician agency at every consequential decision.
+4. Separate reported coverage facts from interpretation and uncertainty.
+5. Make latency, integrations, and recovery visible without derailing the case.
+6. Create visual impact through evidence changing the argument, not decoration.
 
 ## 1. Build the judged moment
 
@@ -27,6 +55,12 @@ workflow:
 
 Sponsor logos are not features. An integration counts only when removing it would make
 the demonstrated workflow materially weaker.
+
+There are four distinct readiness levels: designed, verified standalone, integrated
+into the application, and demo-ready. The plan must state the current level honestly.
+Provider documentation, credentials, or a proposed adapter are not evidence of an
+implemented integration. Demo readiness requires a visible success path and a visible,
+retryable failure path using the same application contract.
 
 ## 3. The clinician remains the decision-maker
 
@@ -80,26 +114,29 @@ The product should demonstrate that clinical quality and administrative feasibil
 be considered together without pretending that payer data is more definitive than it
 is.
 
-## 7. Prefer real boundaries and deterministic interiors
+## 7. The integrated system is the product
 
-The demo should touch each sponsor product through a genuine integration. The system
-around those calls should be deterministic enough to rehearse and recover.
+The application should use each sponsor product through a genuine integration. The
+visible result must be produced from the current patient record, clinician input, and
+provider responses.
 
 Real Medplum resources, a real Moss search, a real Stedi test-mode request, and a real
-Deepgram interaction are valuable. Random model output, uncontrolled UI transitions,
-and unrecoverable stage dependencies are not.
+Deepgram interaction are the product, not optional presentation effects. Changing the
+clinician's words or the patient's record should be capable of changing the output.
 
-Use validated fixtures for development and fallback. Keep their shapes identical to the
-live integration results.
+Use validated fixtures for automated tests and isolated development. Keep their shapes
+identical to live integration results, but never substitute them silently when a live
+operation fails.
 
-## 8. A fallback is part of the product
+## 8. Recovery must not counterfeit success
 
-Voice, network, and model calls can fail during a presentation. The fallback should
-preserve the same patient, transcript, differential, benefits, and FHIR output instead
-of opening a separate mock application.
+Voice, network, and model calls can fail. Microphone capture may fall back to a
+prerecorded clinical utterance, but that audio must still pass through Deepgram and the
+same downstream reasoning and integration path.
 
-Live and deterministic modes should drive the same state transitions. Switching modes
-should look like a recovery action, not a change of product.
+Failures from reasoning, Moss, Medplum, or Stedi remain visible and retryable. A failed
+provider call must not be replaced by a canned success response in the interactive
+application.
 
 ## 9. Optimize perceived latency
 
@@ -141,6 +178,11 @@ the agreed events. The Stedi workstream may use REST or MCP as long as it return
 canonical benefits projection. The UI should consume domain state rather than provider
 payloads directly.
 
+The reasoning runtime owns orchestration of clinical tools. Deepgram owns the voice
+transport, transcription and turn handling, and speech output around that runtime.
+Whether the selected Deepgram configuration uses a managed model or a team-selected
+model must not change the application tool contracts or canonical session state.
+
 ## 12. Keep secrets and real patient information out
 
 Hackathon scope does not remove the need for basic repository hygiene. Keys stay in the
@@ -152,8 +194,9 @@ domain even while intentionally avoiding production hardening.
 
 ## 13. Stop when the loop is complete
 
-Once the golden path works in live and deterministic modes, effort moves to rehearsal,
-video, submission, and presentation polish.
+Once the golden path works with microphone and prerecorded voice input through the same
+live downstream integrations, effort moves to rehearsal, video, submission, and
+presentation polish.
 
 Do not add another case, agent, dashboard, payer workflow, or clinical feature while a
 required demo beat remains unreliable or unclear.
