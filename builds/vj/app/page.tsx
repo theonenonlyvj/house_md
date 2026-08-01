@@ -1,5 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import type { Argument, ConversationTurn, EvidenceRef, Seat, SessionState } from '../src/shared/types';
 
 // The panel consult room. Decision support, not diagnosis: the panel argues, the
@@ -188,14 +189,48 @@ function shortLabel(seat: Seat): string {
   return SHORT_LABEL[seat.specialty] || seat.specialty.split('-')[0].slice(0, 7).toUpperCase();
 }
 
-function SeatPill({ seat, speaking }: { seat: Seat; speaking: boolean }) {
-  const role = seatRole(seat);
+// Fixed panel strip — visual cast at the top of the room (avatars + brief labels).
+const PANEL_STRIP: {
+  label: string;
+  avatar: string;
+  personaIds: string[];
+  specialties: string[];
+  role: SeatRole;
+}[] = [
+  { label: 'HOUSE', avatar: '/avatars/house.png', personaIds: ['house', 'chair-house'], specialties: ['internal-medicine'], role: 'chair' },
+  { label: 'SKEPTIC', avatar: '/avatars/skeptic.png', personaIds: ['skeptic'], specialties: ['diagnostic-skeptic'], role: 'specialist' },
+  { label: 'CARDIO', avatar: '/avatars/cardiology.png', personaIds: ['cardiology'], specialties: ['cardiology'], role: 'specialist' },
+  { label: 'NEPHRO', avatar: '/avatars/nephrology.png', personaIds: ['nephrology'], specialties: ['nephrology'], role: 'specialist' },
+  { label: 'NEURO', avatar: '/avatars/neurology.png', personaIds: ['neurology'], specialties: ['neurology'], role: 'specialist' },
+  { label: 'ENDO', avatar: '/avatars/endocrinology.png', personaIds: ['endocrinology'], specialties: ['endocrinology'], role: 'specialist' },
+  { label: 'HEME', avatar: '/avatars/hematology.png', personaIds: ['hematology'], specialties: ['hematology'], role: 'specialist' },
+  { label: 'ADVOCATE', avatar: '/avatars/reimbursement.png', personaIds: ['advocate'], specialties: ['reimbursement', 'patient-advocacy'], role: 'reimb' },
+];
+
+function panelSlotSpeaking(
+  slot: typeof PANEL_STRIP[number],
+  floorTurn: ConversationTurn | null,
+  seats: Seat[]
+): boolean {
+  if (!floorTurn) return false;
+  if (floorTurn.personaId && slot.personaIds.includes(floorTurn.personaId)) return true;
+  if (floorTurn.role === 'chair' && slot.role === 'chair') return true;
+  const seat = seats.find(
+    (st) =>
+      (st.personaId && slot.personaIds.includes(st.personaId)) ||
+      slot.specialties.includes(st.specialty)
+  );
+  if (seat && floorTurn.personaId === seat.personaId) return true;
+  return false;
+}
+
+function PanelSeat({ slot, speaking }: { slot: typeof PANEL_STRIP[number]; speaking: boolean }) {
   return (
-    <div
-      className={`seat ${role}${speaking ? ' speaking' : ''}`}
-      title={[seat.personaName, seat.specialty.replace(/-/g, ' '), ...seat.reasons].filter(Boolean).join(' · ')}
-    >
-      {shortLabel(seat)}
+    <div className={`seat ${slot.role}${speaking ? ' speaking' : ''}`}>
+      <div className="seat-avatar">
+        <Image src={slot.avatar} alt="" width={48} height={48} />
+      </div>
+      <span className="seat-label">{slot.label}</span>
     </div>
   );
 }
@@ -250,12 +285,6 @@ export default function Page() {
 
   const seats = s.seating?.seats || [];
   const chairSeat = seats.find((st) => seatRole(st) === 'chair');
-  // The panel, in DEMO_SPEC order: chair first, specialists, advocate last.
-  const panelSeats = [
-    ...(chairSeat ? [chairSeat] : []),
-    ...seats.filter((st) => seatRole(st) === 'specialist'),
-    ...seats.filter((st) => seatRole(st) === 'reimb'),
-  ];
   const canConvene = s.phase === 'case-ready' || s.phase === 'recoverable-error';
   // Finalize is gated on the clinical flow: leading dx selected AND a proposed
   // workup with selected options AND the session in a plan-ready phase.
@@ -296,12 +325,12 @@ export default function Page() {
   );
   const lastTurn = visibleTurns[visibleTurns.length - 1];
   const floorTurn = lastTurn && lastTurn.role !== 'clinician' && Date.now() - lastTurn.at < 8000 ? lastTurn : null;
-  const hasFloor = (seat: Seat) =>
-    !!floorTurn &&
-    (seat.personaId === floorTurn.personaId || (floorTurn.role === 'chair' && seatRole(seat) === 'chair'));
 
   const chairShort = chairSeat ? shortLabel(chairSeat) : 'CHAIR';
   const shortById: Record<string, string> = {};
+  for (const slot of PANEL_STRIP) {
+    for (const id of slot.personaIds) shortById[id] = slot.label;
+  }
   for (const seat of seats) if (seat.personaId) shortById[seat.personaId] = shortLabel(seat);
   const whoFor = (t: ConversationTurn): string => {
     if (t.role === 'clinician') return 'YOU';
@@ -339,6 +368,16 @@ export default function Page() {
 
       <div className="main">
         <section className="chamber">
+          <div className="experts">
+            {PANEL_STRIP.map((slot) => (
+              <PanelSeat
+                key={slot.label}
+                slot={slot}
+                speaking={panelSlotSpeaking(slot, floorTurn, seats)}
+              />
+            ))}
+          </div>
+
           <div className="whiteboard">
             {!s.patient && (
               <div className="wb-empty placeholder">
@@ -439,12 +478,6 @@ export default function Page() {
                 </div>
               </>
             )}
-          </div>
-
-          <div className="experts">
-            {panelSeats.map((seat, i) => (
-              <SeatPill key={`${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
-            ))}
           </div>
 
           <div className="foot">
