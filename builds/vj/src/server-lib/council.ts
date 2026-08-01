@@ -419,7 +419,9 @@ export async function assemble(presentation: string): Promise<void> {
   await openAgent(presentation);
 }
 
-async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-5-mini', isRetry = false): Promise<void> {
+// gpt-4o-mini: ~0.4s to first token vs gpt-5-mini's 7-15s — conversational feel wins
+// (Vijay, 3:44pm). Structure/guardrails are code-enforced regardless of model depth.
+async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-4o-mini', isRetry = false): Promise<void> {
   closeAgent();
   const dgKey = key('DEEPGRAM_API_KEY');
   if (!dgKey) {
@@ -511,13 +513,13 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       // SLOW_THINK_REQUEST is routine for gpt-5-mini — surface as activity, not error.
       mutate((s) => { s.activity = 'the council is thinking — deep reasoning takes a few seconds…'; });
       if (String(msg.code || msg.description || '').includes('THINK_REQUEST_FAILED') && !isRetry) {
-        openAgent(presentation, 'gpt-4o-mini', true);
+        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       }
       return;
     }
     if (msg.type === 'Error') {
       if (!isRetry) {
-        openAgent(presentation, 'gpt-4o-mini', true);
+        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       } else {
         mutate((s) => { s.phase = 'recoverable-error'; s.error = `Agent error: ${String(msg.description || msg.message || 'unknown').slice(0, 200)} — retry available`; });
       }
