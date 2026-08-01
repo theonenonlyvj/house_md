@@ -2,12 +2,20 @@
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { AgentMicrophone, AgentPlayer, AgentSession, type FunctionCallRequestMessage } from '@deepgram/agents';
+import Image from 'next/image';
 import { AGENT_SETTINGS } from '@/client/voice-agent';
 import { isSessionState, specialistLinesFor, type SpecialistLine } from '@/client/voice-functions';
 import type { Claim, CreatedResource, EvidenceItem, IntegrationName, Seat, SessionState, WorkupItem } from '@/domain/types';
 
 const SESSION_ID = 'demo-session';
 const INTEGRATION_NAMES: IntegrationName[] = ['medplum', 'deepgram', 'moss', 'stedi'];
+const DOCTOR_AVATARS: Record<string, string> = {
+  house: '/avatars/house.png',
+  skeptic: '/avatars/skeptic.png',
+  cardiology: '/avatars/cardiology.png',
+  neurology: '/avatars/neurology.png',
+  nephrology: '/avatars/nephrology.png',
+};
 
 export default function LivingDifferentialPage() {
   const [state, setState] = useState<SessionState | null>(null);
@@ -394,13 +402,14 @@ function Integration({ name, state }: { name: IntegrationName; state: SessionSta
 }
 
 function CouncilSeat({ seat, index }: { seat: Seat; index: number }) {
+  const avatar = seat.persona ? DOCTOR_AVATARS[seat.persona.id] : undefined;
   return <div className={`council-seat seat-${seat.kind} seat-position-${index % 8}${seat.active ? ' seat-active' : ''}`} title={seat.reason} style={{ '--seat-index': index } as CSSProperties}>
-    <div className="seat-avatar">{seat.kind === 'empty' ? '—' : initials(seat.label)}</div><div><strong>{seat.label}</strong><span>{seat.specialty.replace('-', ' ')}</span><p>{seat.reason}</p></div>
+    <div className={`seat-avatar${avatar ? ' seat-avatar-photo' : ''}`}>{avatar ? <Image src={avatar} alt="" width={44} height={44} /> : seat.kind === 'empty' ? '—' : initials(seat.label)}</div><div><strong>{seat.label}</strong><span>{seat.specialty.replace('-', ' ')}</span><p>{seat.reason}</p></div>
   </div>;
 }
 
 function UnassembledSeats() {
-  return <><div className="council-seat placeholder-seat seat-position-0"><div className="seat-avatar">H</div><div><strong>Chair</strong><span>Waiting</span></div></div><div className="council-seat placeholder-seat seat-position-4"><div className="seat-avatar">You</div><div><strong>Managing clinician</strong><span>Present the case</span></div></div></>;
+  return <><div className="council-seat placeholder-seat seat-position-0"><div className="seat-avatar seat-avatar-photo"><Image src={DOCTOR_AVATARS.house} alt="" width={44} height={44} /></div><div><strong>Chair</strong><span>Waiting</span></div></div><div className="council-seat placeholder-seat seat-position-4"><div className="seat-avatar">You</div><div><strong>Managing clinician</strong><span>Present the case</span></div></div></>;
 }
 
 function Evidence({ item, open }: { item: EvidenceItem; open: () => void }) {

@@ -67,7 +67,9 @@ p { text-wrap: pretty; }
 .seat-position-5 { bottom: 120px; left: 42px; }
 .seat-position-6 { top: 280px; left: 4px; }
 .seat-position-7 { top: 42px; left: 42px; }
-.seat-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 38px; height: 38px; border-radius: 50%; background: var(--surface-strong); color: var(--ink); font-size: 11px; font-weight: 800; }
+.seat-avatar { flex: 0 0 auto; display: grid; place-items: center; width: 44px; height: 44px; overflow: hidden; border-radius: 50%; background: var(--surface-strong); color: var(--ink); font-size: 11px; font-weight: 800; }
+.seat-avatar-photo { border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--line-strong); }
+.seat-avatar-photo img { width: 100%; height: 100%; object-fit: cover; }
 .council-seat strong, .council-seat span { display: block; }
 .council-seat strong { font-size: 12px; }
 .council-seat span { color: var(--muted); font-size: 10px; text-transform: capitalize; }
@@ -78,7 +80,7 @@ p { text-wrap: pretty; }
 .seat-human .seat-avatar { background: var(--accent); color: white; }
 .seat-reimbursement .seat-avatar { background: var(--accent-pale); color: var(--accent); }
 .seat-active { border-color: var(--accent); box-shadow: 0 0 0 2px oklch(0.72 0.13 195 / .35); }
-.seat-active .seat-avatar { color: white; background: var(--accent); animation: pulse 1s ease-out infinite; }
+.seat-active .seat-avatar { color: white; background: var(--accent); box-shadow: 0 0 0 2px var(--accent); animation: pulse 1s ease-out infinite; }
 .seat-empty { border-style: dashed; border-color: var(--warning); background: var(--warning-pale); }
 .seat-empty .seat-avatar { color: var(--warning); background: var(--bg); border: 1px dashed var(--warning); }
 .placeholder-seat { opacity: .68; }
