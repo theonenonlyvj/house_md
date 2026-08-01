@@ -1,7 +1,7 @@
 # AGENTS.md — house_md (read this before writing any code)
 
 One-day hackathon build (YC × Medplum Agentic Healthcare Hackathon, Sat 2026-08-01,
-**submit 5:00pm PT**). Team: Vijay, Thai, Noah. Plan: `docs/PLAN.md`. This file applies
+**submit 5:00pm PT**). Team: Vijay, Thai, Noah, Felix. Plan: `docs/PLAN.md`. This file applies
 to every coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
 
 ## Ground rules
