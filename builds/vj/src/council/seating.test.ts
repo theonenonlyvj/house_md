@@ -51,6 +51,15 @@ describe('seating (Guardrail #1)', () => {
     expect(d.seats.find((s) => s.specialty === 'gastroenterology')).toBeUndefined();
     expect(d.seats.find((s) => s.specialty === 'infectious-disease')).toBeUndefined();
   });
+
+  it('full-roster mode seats the entire DEMO_SPEC cast with no empty seats', () => {
+    const d = decideSeating(tuanFeatures, ROSTER, 'primary-care', true);
+    expect(emptySeats(d).length).toBe(0);
+    const ids = d.seats.map((s) => s.personaId).filter(Boolean);
+    for (const p of ROSTER) expect(ids).toContain(p.id);
+    expect(d.seats.every((s) => s.reasons.length > 0)).toBe(true);
+    expect(d.seats.map((s) => s.status)).toContain('human');
+  });
 });
 
 describe('deriveFeatures', () => {

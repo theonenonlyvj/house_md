@@ -39,7 +39,8 @@ export function requiredSpecialties(features: CaseFeatures): { specialty: string
 export function decideSeating(
   features: CaseFeatures,
   roster: Persona[],
-  clinicianSpecialty: string
+  clinicianSpecialty: string,
+  seatFullRoster = false
 ): SeatingDecision {
   const seats: Seat[] = [];
 
@@ -69,6 +70,23 @@ export function decideSeating(
     personaName: 'You (managing clinician)',
     reasons: ['presenting and managing this case'],
   });
+
+  // Full-roster mode (demo panel): every roster specialist is named to the consult.
+  // The case-driven engine and its empty-seat mechanism remain the default path.
+  if (seatFullRoster) {
+    const required = requiredSpecialties(features);
+    for (const p of roster.filter((r) => r.kind === 'specialist')) {
+      const req = required.find((r) => r.specialty === p.specialty);
+      seats.push({
+        specialty: p.specialty,
+        status: 'seated',
+        personaId: p.id,
+        personaName: p.name,
+        reasons: [req ? req.reason : 'named to this consult'],
+      });
+    }
+    return { seats };
+  }
 
   for (const req of requiredSpecialties(features)) {
     const p = roster.find((r) => r.kind === 'specialist' && r.specialty === req.specialty);

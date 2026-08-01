@@ -1,12 +1,11 @@
 import { NextResponse } from 'next/server';
 import { assemble } from '../../../../src/server-lib/council';
-import { DEFAULT_CASE } from '../../../../src/case/default-case';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
-  const body = await req.json().catch(() => ({}));
-  const presentation = String(body.presentation || DEFAULT_CASE.presentation);
-  await assemble(presentation);
+// Convening seats the panel and opens the live session in LISTENING state — the
+// clinician's actual voice presents the case; no canned presentation is injected.
+export async function POST() {
+  await assemble();
   return NextResponse.json({ ok: true });
 }
