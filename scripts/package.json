@@ -1,0 +1,9 @@
+{
+  "name": "house-md-scripts",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@moss-dev/moss": "^1.4.1",
+    "ws": "^8.18.0"
+  }
+}

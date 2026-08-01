@@ -1,0 +1,448 @@
+import WebSocket from 'ws';
+import { key } from './env';
+import { loadChart, searchEvidence, type LoadedChart } from './chart';
+import { getState, mutate, pushAudio } from './session';
+import { decideSeating, deriveFeatures, emptySeats } from '../council/seating';
+import { ROSTER } from '../council/personas';
+import { DEFAULT_CASE } from '../case/default-case';
+import type { Argument, DifferentialItem, EvidenceRef, SpecialistContribution } from '../shared/types';
+
+// The council brain: ONE headless Deepgram Voice Agent session (managed think model —
+// the only LLM in the system). The model role-plays the whole council inside tool-call
+// JSON; the server validates citations and renders. Server never generates arguments.
+
+const DG_URL = 'wss://agent.deepgram.com/v1/agent/converse';
+const g = globalThis as any;
+
+interface Live {
+  ws: WebSocket | null;
+  ready: boolean;
+  chart: LoadedChart | null;
+  patientPlanText: string;
+}
+if (!g.__housemd_live) g.__housemd_live = { ws: null, ready: false, chart: null, patientPlanText: '' } as Live;
+const live: Live = g.__housemd_live;
+
+// ---- citation validation (Guardrail #2 — computed, never model-asserted) ----
+export function validateArgument(
+  raw: { claim?: string; aliases?: string[] },
+  aliasMap: Map<string, EvidenceRef>
+): Argument {
+  const aliases = Array.isArray(raw.aliases) ? raw.aliases.filter((a) => typeof a === 'string') : [];
+  const resolved = aliases.map((a) => aliasMap.get(a.trim().toUpperCase())).filter(Boolean) as EvidenceRef[];
+  return {
+    claim: String(raw.claim || '').slice(0, 400),
+    aliases,
+    resolved,
+    provenance: resolved.length > 0 ? 'cited' : 'conjecture',
+  };
+}
+
+function aliasMapOf(chart: LoadedChart): Map<string, EvidenceRef> {
+  return new Map(chart.aliases.map((a) => [a.alias.toUpperCase(), a]));
+}
+
+// ---- function (tool) definitions given to the managed model ----
+const FUNCTION_DEFS = [
+  {
+    name: 'search_patient_evidence',
+    description:
+      'Search the patient chart for evidence. Returns evidence items each with an alias (like E3). You may ONLY cite aliases returned by this function. Call it before asserting anything patient-specific.',
+    parameters: {
+      type: 'object',
+      properties: { query: { type: 'string', description: 'clinical concepts to search for' } },
+      required: ['query'],
+    },
+  },
+  {
+    name: 'submit_council_output',
+    description:
+      'Submit the full council debate as structured data. Every specialist contribution and every differential evidence claim must carry aliases from search_patient_evidence. Claims without valid aliases will be labeled CONJECTURE automatically.',
+    parameters: {
+      type: 'object',
+      properties: {
+        contributions: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              personaId: { type: 'string' },
+              specialty: { type: 'string' },
+              interpretation: {
+                type: 'object',
+                properties: { claim: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } } },
+                required: ['claim'],
+              },
+              contradiction: {
+                type: 'object',
+                properties: { claim: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } } },
+              },
+              discriminator: { type: 'string' },
+            },
+            required: ['personaId', 'specialty', 'interpretation'],
+          },
+        },
+        differential: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              display: { type: 'string' },
+              rank: { type: 'number' },
+              assessment: { type: 'string' },
+              supporting: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { claim: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } } },
+                },
+              },
+              contradicting: {
+                type: 'array',
+                items: {
+                  type: 'object',
+                  properties: { claim: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } } },
+                },
+              },
+            },
+            required: ['display', 'rank', 'assessment'],
+          },
+        },
+        chair_summary: { type: 'string' },
+      },
+      required: ['contributions', 'differential', 'chair_summary'],
+    },
+  },
+  {
+    name: 'propose_workup',
+    description: 'Propose 2-4 next workup steps for the selected leading hypothesis.',
+    parameters: {
+      type: 'object',
+      properties: {
+        options: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              display: { type: 'string' },
+              purpose: { type: 'string' },
+              priority: { type: 'string', enum: ['now', 'next', 'later'] },
+            },
+            required: ['display', 'purpose', 'priority'],
+          },
+        },
+      },
+      required: ['options'],
+    },
+  },
+  {
+    name: 'get_benefits',
+    description:
+      'Run the live insurance eligibility check (Stedi test mode). Returns only facts the payer response contains. Call this after proposing the workup; then have Ms. Okafor (patient services) speak the coverage reality and any re-sequencing.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
+    name: 'submit_patient_plan',
+    description:
+      'Submit a short plain-language version of the confirmed plan, written for the patient (no jargon, honest about uncertainty and costs). Called once the clinician confirms.',
+    parameters: {
+      type: 'object',
+      properties: { text: { type: 'string' } },
+      required: ['text'],
+    },
+  },
+];
+
+// ---- tool implementations (server side — validation + state, no generation) ----
+async function runTool(name: string, args: any): Promise<unknown> {
+  const chart = live.chart!;
+  const amap = aliasMapOf(chart);
+
+  if (name === 'search_patient_evidence') {
+    mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${String(args.query).slice(0, 80)}"`; });
+    const hits = searchEvidence(chart, String(args.query || ''));
+    mutate((s) => { s.activity = `chart search returned ${hits.length} of ${chart.aliases.length} records`; });
+    return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
+  }
+
+  if (name === 'submit_council_output') {
+    const contributions: SpecialistContribution[] = (args.contributions || []).map((c: any) => ({
+      personaId: String(c.personaId || ''),
+      specialty: String(c.specialty || ''),
+      interpretation: validateArgument(c.interpretation || {}, amap),
+      contradiction: c.contradiction ? validateArgument(c.contradiction, amap) : undefined,
+      discriminator: c.discriminator ? String(c.discriminator).slice(0, 200) : undefined,
+    }));
+    const differential: DifferentialItem[] = (args.differential || []).map((d: any, i: number) => ({
+      id: `dx-${i + 1}`,
+      display: String(d.display || '').slice(0, 120),
+      rank: Number(d.rank) || i + 1,
+      assessment: String(d.assessment || '').slice(0, 300),
+      status: 'candidate' as const,
+      supporting: (d.supporting || []).map((x: any) => validateArgument(x, amap)),
+      contradicting: (d.contradicting || []).map((x: any) => validateArgument(x, amap)),
+      lastChangedBy: 'council debate',
+    }));
+    const demoted = [
+      ...contributions.map((c) => c.interpretation),
+      ...differential.flatMap((d) => [...d.supporting, ...d.contradicting]),
+    ].filter((a) => a.provenance === 'conjecture').length;
+    mutate((s) => {
+      s.contributions = contributions;
+      s.differential = differential.sort((a, b) => a.rank - b.rank);
+      s.phase = 'differential-ready';
+      s.activity = demoted > 0 ? `${demoted} uncited claim(s) demoted to conjecture` : 'all claims cited';
+    });
+    return { ok: true, conjecture_demotions: demoted, note: demoted > 0 ? 'Chair: acknowledge the demoted claims as conjecture.' : 'All claims validated.' };
+  }
+
+  if (name === 'propose_workup') {
+    mutate((s) => {
+      s.workup = (args.options || []).slice(0, 4).map((o: any, i: number) => ({
+        id: `opt-${i + 1}`,
+        display: String(o.display || '').slice(0, 120),
+        purpose: String(o.purpose || '').slice(0, 200),
+        priority: ['now', 'next', 'later'].includes(o.priority) ? o.priority : 'next',
+        selected: true,
+      }));
+      s.phase = 'workup-ready';
+      s.activity = undefined;
+    });
+    return { ok: true };
+  }
+
+  if (name === 'get_benefits') {
+    mutate((s) => { s.phase = 'checking-benefits'; s.activity = 'live eligibility check (Stedi test mode)…'; });
+    try {
+      const { runEligibility } = await import('./stedi');
+      const { facts } = await runEligibility(DEFAULT_CASE.stediScenario);
+      mutate((s) => {
+        const referral = facts.messages.find((m) => /referral/i.test(m));
+        for (const opt of s.workup) {
+          const isConsult = /consult|referral|cardiolog|specialist/i.test(opt.display);
+          if (isConsult) {
+            opt.benefit = facts;
+            if (referral) {
+              opt.sequenceNote = 'Re-sequenced: requires PCP referral first — scheduled behind it';
+              opt.priority = 'next';
+            }
+          } else {
+            opt.benefit = { ...facts, matched: false, copay: undefined, messages: [] };
+            if (opt.priority !== 'now') opt.priority = 'now';
+          }
+        }
+        s.phase = 'benefits-ready';
+        s.activity = undefined;
+      });
+      return {
+        facts: {
+          planActive: facts.planActive,
+          specialistCopay: facts.copay,
+          deductibleRemaining: facts.deductibleRemaining,
+          outOfPocketRemaining: facts.oopRemaining,
+          payerMessages: facts.messages,
+          note: 'Speak ONLY these facts. Labs have no service-specific rows — say so. The consult re-sequences behind the referral.',
+        },
+      };
+    } catch (e: any) {
+      mutate((s) => { s.phase = 'recoverable-error'; s.error = `Eligibility check failed: ${String(e.message || e).slice(0, 200)} — retry available`; s.activity = undefined; });
+      return { error: 'eligibility check failed — tell the clinician it can be retried; do not invent coverage facts' };
+    }
+  }
+
+  if (name === 'submit_patient_plan') {
+    live.patientPlanText = String(args.text || '').slice(0, 2000);
+    return { ok: true };
+  }
+
+  return { error: `unknown function ${name}` };
+}
+
+// ---- prompt ----
+function councilPrompt(): string {
+  const s = getState();
+  const seated = s.seating!.seats.filter((x) => x.status === 'seated');
+  const empty = s.seating!.seats.filter((x) => x.status === 'empty');
+  const personas = seated
+    .map((seat) => {
+      const p = ROSTER.find((r) => r.id === seat.personaId);
+      return p ? `- ${p.name} (${p.specialty}, id:${p.id}): ${p.style}` : '';
+    })
+    .filter(Boolean)
+    .join('\n');
+  return [
+    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). You may quote at most two short specialist lines aloud, attributed by name.',
+    `SEATED COUNCIL (role-play each in structured output):\n${personas}`,
+    empty.length
+      ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
+      : '',
+    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence; cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) Keep spoken output short; the table shows the detail.',
+    `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+function buildSettings(thinkModel: string) {
+  const think: any = { provider: { type: 'open_ai', model: thinkModel }, prompt: councilPrompt().slice(0, 24000), functions: FUNCTION_DEFS };
+  // NOTE: no temperature — gpt-5-mini hard-rejects non-default values (verified live today).
+  const s = getState();
+  const empty = s.seating ? emptySeats(s.seating) : [];
+  const greeting = `Council assembled for ${s.patient?.name}. ${empty.length ? `Note for the record: this case warrants ${empty.map((e) => e.specialty).join(' and ')} — ${empty.length > 1 ? 'those seats are' : 'that seat is'} empty. We flag gaps, we don't fake them. ` : ''}Doctor, present your case.`;
+  return {
+    type: 'Settings',
+    audio: { input: { encoding: 'linear16', sample_rate: 24000 }, output: { encoding: 'linear16', sample_rate: 24000, container: 'none' } },
+    agent: {
+      language: 'en',
+      listen: { provider: { type: 'deepgram', model: 'nova-3' } },
+      think,
+      speak: { provider: { type: 'deepgram', model: 'aura-2-apollo-en' } },
+      greeting: greeting.slice(0, 295),
+    },
+  };
+}
+
+// ---- session lifecycle ----
+export async function assemble(presentation: string): Promise<void> {
+  const chart = await loadChart();
+  live.chart = chart;
+  const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
+  const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty);
+  mutate((s) => {
+    s.patient = chart.banner;
+    s.features = features;
+    s.seating = seating;
+    s.phase = 'reasoning';
+    s.activity = chart.source === 'dev-local' ? 'DEV CHART (Medplum patient pending — plug Noah’s seed into case config)' : undefined;
+    s.transcript.push({ role: 'clinician', text: presentation, at: Date.now() });
+  });
+
+  await openAgent(presentation);
+}
+
+async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-5-mini', isRetry = false): Promise<void> {
+  closeAgent();
+  const dgKey = key('DEEPGRAM_API_KEY');
+  if (!dgKey) {
+    mutate((s) => { s.phase = 'recoverable-error'; s.error = 'DEEPGRAM_API_KEY missing — voice/reasoning unavailable'; });
+    return;
+  }
+  const ws = new WebSocket(DG_URL, { headers: { Authorization: `Token ${dgKey}` } });
+  live.ws = ws;
+  live.ready = false;
+
+  ws.on('open', () => {
+    try {
+      const settings = buildSettings(thinkModel);
+      console.log('[council] ws open — sending Settings', thinkModel, 'bytes:', JSON.stringify(settings).length);
+      ws.send(JSON.stringify(settings));
+    } catch (e) {
+      console.error('[council] buildSettings threw:', e);
+      mutate((s) => { s.phase = 'recoverable-error'; s.error = `Settings build failed: ${String(e).slice(0, 200)}`; });
+    }
+  });
+
+  ws.on('message', async (data: any, isBinary: boolean) => {
+    if (ws !== live.ws) return;
+    if (isBinary) { pushAudio(Buffer.from(data)); return; }
+    let msg: any;
+    try { msg = JSON.parse(data.toString()); } catch { return; }
+    if (msg.type !== 'ConversationText') console.log('[council] event:', msg.type, msg.code || msg.description || '');
+
+    if (msg.type === 'SettingsApplied') {
+      live.ready = true;
+      // Drive the debate: inject the presentation as the clinician's opening.
+      setTimeout(() => {
+        inject(`${presentation}\n\nChair: convene the council. Have each seated specialist argue their read (search the chart first), then submit via submit_council_output.`);
+      }, 1200);
+      return;
+    }
+    if (msg.type === 'ConversationText') {
+      mutate((s) => {
+        const role = msg.role === 'assistant' ? 'chair' : 'clinician';
+        s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text: String(msg.content || ''), at: Date.now() });
+      });
+      return;
+    }
+    if (msg.type === 'FunctionCallRequest') {
+      for (const fn of msg.functions || []) {
+        let args = {};
+        try { args = JSON.parse(fn.arguments || '{}'); } catch {}
+        const result = await runTool(fn.name, args);
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: JSON.stringify(result) }));
+        }
+      }
+      return;
+    }
+    if (msg.type === 'Warning') {
+      // SLOW_THINK_REQUEST is routine for gpt-5-mini — surface as activity, not error.
+      mutate((s) => { s.activity = `model thinking… (${msg.code || 'warning'})`; });
+      if (String(msg.code || msg.description || '').includes('THINK_REQUEST_FAILED') && !isRetry) {
+        openAgent(presentation, 'gpt-4o-mini', true);
+      }
+      return;
+    }
+    if (msg.type === 'Error') {
+      if (!isRetry) {
+        openAgent(presentation, 'gpt-4o-mini', true);
+      } else {
+        mutate((s) => { s.phase = 'recoverable-error'; s.error = `Agent error: ${String(msg.description || msg.message || 'unknown').slice(0, 200)} — retry available`; });
+      }
+    }
+  });
+
+  ws.on('error', (e: any) => {
+    if (ws === live.ws) mutate((s) => { s.phase = 'recoverable-error'; s.error = `Voice session error: ${String(e.message || e).slice(0, 150)} — retry available`; });
+  });
+}
+
+export function inject(text: string): boolean {
+  if (live.ws && live.ready && live.ws.readyState === WebSocket.OPEN) {
+    live.ws.send(JSON.stringify({ type: 'InjectUserMessage', content: text.slice(0, 1500) }));
+    return true;
+  }
+  return false;
+}
+
+export function clinicianSays(text: string): boolean {
+  mutate((s) => { s.transcript.push({ role: 'clinician', text, at: Date.now() }); s.phase = 'reasoning'; });
+  return inject(text);
+}
+
+export function selectHypothesis(id: string): void {
+  mutate((s) => {
+    s.selectedHypothesisId = id;
+    for (const d of s.differential) d.status = d.id === id ? 'leading' : d.status === 'leading' ? 'candidate' : d.status;
+    s.phase = 'hypothesis-selected';
+  });
+  const s = getState();
+  const dx = s.differential.find((d) => d.id === id);
+  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it, then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
+}
+
+export function sendMicAudio(buf: Buffer): void {
+  if (live.ws && live.ready && live.ws.readyState === WebSocket.OPEN) live.ws.send(buf);
+}
+
+export function getPatientPlanText(): string {
+  if (live.patientPlanText) return live.patientPlanText;
+  // Deterministic fallback template — honest, plain, no invention.
+  const s = getState();
+  const dx = s.differential.find((d) => d.id === s.selectedHypothesisId);
+  const opts = s.workup.filter((o) => o.selected);
+  return [
+    `Your care team met to discuss your symptoms. The leading possibility we are looking into is: ${dx?.display || 'still being evaluated'}. This is NOT a confirmed diagnosis — the next tests are how we find out.`,
+    `Next steps: ${opts.map((o) => `${o.display} (${o.purpose})${o.sequenceNote ? ' — ' + o.sequenceNote : ''}`).join('; ')}.`,
+    opts.some((o) => o.benefit?.copay) ? `What your insurance said: your plan is active; a specialist visit has a ${opts.find((o) => o.benefit?.copay)?.benefit?.copay} copay. Some tests did not return specific coverage information — the office will confirm before scheduling. These are estimates, not guarantees.` : 'Coverage details will be confirmed by the office before scheduling.',
+    'Your doctor makes every decision with you. Bring questions — nothing here is set without your consent.',
+  ].join('\n\n');
+}
+
+export function closeAgent(): void {
+  live.ready = false;
+  if (live.ws) {
+    try { live.ws.close(); } catch {}
+    live.ws = null;
+  }
+}
