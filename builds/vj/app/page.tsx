@@ -72,13 +72,20 @@ function useChairAudio(enabled: boolean) {
   }, [enabled]);
 }
 
-// Push-to-talk: hold → mic PCM (24k linear16 via worklet) → /ws/voice → the live
-// council session's listen leg (nova-3). Release to stop. You are at the table.
-function usePushToTalk() {
-  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream }>({});
-  const [talking, setTalking] = useState(false);
-  const start = useCallback(async () => {
-    if (ref.current.ws) return;
+// Always-on mic with instant mute/unmute. Setup (permission + WS + worklet) happens
+// ONCE on first enable; after that the toggle just gates frames — zero latency, no
+// lost first words. While unmuted, audio streams continuously to the session's
+// nova-3 listen leg; its VAD handles turns and barge-in.
+function useMic() {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean; muted: boolean }>({ live: false, muted: true });
+  const [state, setState] = useState<'off' | 'muted' | 'live'>('off');
+  const toggle = useCallback(async () => {
+    const r = ref.current;
+    if (r.live) {
+      r.muted = !r.muted;
+      setState(r.muted ? 'muted' : 'live');
+      return;
+    }
     try {
       const ws = new WebSocket(`ws://${location.host}/ws/voice`);
       await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
@@ -89,23 +96,19 @@ function usePushToTalk() {
       await ctx.audioWorklet.addModule('/pcm-worklet.js');
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'pcm-capture');
-      node.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+      node.port.onmessage = (e) => {
+        const cur = ref.current;
+        if (!cur.muted && cur.ws && cur.ws.readyState === 1) cur.ws.send(e.data);
+      };
       src.connect(node);
-      ref.current = { ws, ctx, stream };
-      setTalking(true);
+      ws.onclose = () => { ref.current.live = false; ref.current.muted = true; setState('off'); };
+      ref.current = { ws, ctx, stream, live: true, muted: false };
+      setState('live');
     } catch {
-      setTalking(false);
+      setState('off');
     }
   }, []);
-  const stop = useCallback(() => {
-    const { ws, ctx, stream } = ref.current;
-    stream?.getTracks().forEach((t) => t.stop());
-    void ctx?.close();
-    setTimeout(() => ws?.close(), 400);
-    ref.current = {};
-    setTalking(false);
-  }, []);
-  return { talking, start, stop };
+  return { state, toggle };
 }
 
 // Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
@@ -148,7 +151,7 @@ export default function Page() {
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   useChairAudio(audioOn);
-  const ptt = usePushToTalk();
+  const mic = useMic();
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -334,14 +337,14 @@ export default function Page() {
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
             </div>
             <button
-              className={`primary ptt ${ptt.talking ? 'talking' : ''}`}
+              className={`primary ptt ${mic.state === 'live' ? 'talking' : ''}`}
               disabled={s.phase === 'case-ready'}
-              onPointerDown={ptt.start}
-              onPointerUp={ptt.stop}
-              onPointerLeave={ptt.stop}
+              onClick={mic.toggle}
             >
-              {ptt.talking ? '🎙 LISTENING' : '🎙 HOLD to speak to the council'}
-              <span className="hint">{ptt.talking ? 'release when done' : 'press and hold — you are at the table'}</span>
+              {mic.state === 'live' ? '🔴 MIC LIVE — click to mute' : mic.state === 'muted' ? '🎙 Mic muted — click to speak' : '🎙 Enable mic'}
+              <span className="hint">
+                {mic.state === 'live' ? 'the council hears you — you can interrupt the chair' : 'one-time setup, then instant mute/unmute'}
+              </span>
             </button>
             <div className="row">
               <input
