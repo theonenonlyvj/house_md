@@ -284,9 +284,9 @@ export default function Page() {
         ? 'The panel is seated and listening — enable your mic and present your case.'
         : 'The panel is listening — present your case and ask your question.'
       : s.phase === 'differential-ready' && !s.selectedHypothesisId
-        ? 'The panel rests — your call, doctor: set the leading direction below.'
+        ? 'Your call, doctor — tell the panel which direction leads.'
         : s.phase === 'workup-ready' || s.phase === 'benefits-ready'
-          ? 'Your move: review the plan and coverage, then write it to the chart.'
+          ? 'Review the plan — tell the panel to write it to the chart when you’re ready.'
           : null;
 
   // Who has the floor: the seat behind the most recent non-clinician turn, if fresh.
@@ -321,6 +321,7 @@ export default function Page() {
 
   const convene = () => {
     setAudioOn(true); // the click is the user gesture the audio graph needs
+    if (mic.state === 'off') void mic.toggle(); // same gesture grants the mic — zero clicks after this
     setFinalized(null);
     setCreated([]);
     void post('/api/session/assemble');
@@ -386,7 +387,7 @@ export default function Page() {
 
                 {s.workup.length === 0 && s.differential.length > 0 && (
                   <>
-                    <div className="steps-label">The panel’s differential — set the direction</div>
+                    <div className="steps-label">The panel’s differential — say the word (or tap)</div>
                     {s.differential.map((d) => (
                       <button
                         key={d.id}

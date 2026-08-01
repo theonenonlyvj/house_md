@@ -179,6 +179,22 @@ const FUNCTION_DEFS = [
     },
   },
   {
+    name: 'select_hypothesis',
+    description:
+      "Register the clinician's SPOKEN choice of leading direction. Call the moment the clinician states which differential item to pursue (or asks you to pick — state your pick aloud first). Pass their words or the rank number; the server matches against the ranked differential.",
+    parameters: {
+      type: 'object',
+      properties: { choice: { type: 'string', description: "the clinician's words for the chosen direction, or its rank number" } },
+      required: ['choice'],
+    },
+  },
+  {
+    name: 'finalize_to_chart',
+    description:
+      'Write the confirmed plan to the patient chart in Medplum. Call ONLY after the clinician explicitly confirms aloud (e.g. "write it up", "sign it", "go ahead"). Never call without that spoken confirmation.',
+    parameters: { type: 'object', properties: {} },
+  },
+  {
     name: 'get_benefits',
     description:
       'Run the live insurance eligibility check (Stedi test mode). Returns only facts the payer response contains. Call this after proposing the workup; then have the ADVOCATE (patient advocate) speak the coverage reality and any re-sequencing.',
@@ -368,6 +384,63 @@ async function runTool(name: string, args: any): Promise<unknown> {
     return { ok: true };
   }
 
+  // The clinician's SPOKEN choice sets the direction — no click required.
+  if (name === 'select_hypothesis') {
+    const s0 = getState();
+    const choice = String(args.choice || '').toLowerCase();
+    if (s0.differential.length === 0) return { error: 'no differential submitted yet' };
+    const num = choice.match(/\b(\d)\b/);
+    let pick = num ? s0.differential.find((d) => d.rank === Number(num[1])) : undefined;
+    if (!pick) {
+      const score = (d: DifferentialItem) =>
+        d.display.toLowerCase().split(/\W+/).filter((w) => w.length > 3 && choice.includes(w)).length;
+      const best = [...s0.differential].sort((a, b) => score(b) - score(a))[0];
+      if (best && score(best) > 0) pick = best;
+    }
+    if (!pick) return { error: 'could not match that to the differential — ask the clinician to name the direction or its number' };
+    const id = pick.id;
+    mutate((s) => {
+      s.selectedHypothesisId = id;
+      for (const d of s.differential) d.status = d.id === id ? 'leading' : d.status === 'leading' ? 'candidate' : d.status;
+      s.phase = 'hypothesis-selected';
+    });
+    return {
+      ok: true,
+      selected: pick.display,
+      next: 'Direction registered. Now propose_workup (include the specialist consultation the standard pathway warrants), then get_benefits, then the ADVOCATE speaks the coverage reality.',
+    };
+  }
+
+  // The clinician's SPOKEN confirmation writes the chart — no click required.
+  if (name === 'finalize_to_chart') {
+    const s0 = getState();
+    const leading = s0.differential.find((d) => d.id === s0.selectedHypothesisId);
+    if (!leading) return { error: 'no leading direction selected yet — ask the clinician to choose first' };
+    if (!s0.workup.some((o) => o.selected)) return { error: 'no proposed workup yet — propose_workup first' };
+    mutate((s) => { s.phase = 'writing-fhir'; s.activity = 'writing to the chart…'; });
+    try {
+      const { buildFinalizeResources } = await import('./finalize-shapes');
+      const { fhirCreate } = await import('./medplum');
+      const summary = {
+        patientId: s0.patient?.medplumId || 'dev-local',
+        leadingDx: leading.display,
+        differential: s0.differential.map((d) => ({ display: d.display, assessment: d.assessment, rank: d.rank })),
+        selectedOptions: s0.workup.filter((o) => o.selected).map((o) => ({ display: o.display, purpose: o.purpose, sequenceNote: o.sequenceNote })),
+        patientPlanText: getPatientPlanText(),
+      };
+      const created: { resourceType: string; id: string; display: string }[] = [];
+      for (const planned of buildFinalizeResources(summary)) {
+        const result = (await fhirCreate(planned.resource, planned.ifNoneExist)) as { resourceType: string; id?: string };
+        created.push({ resourceType: result.resourceType, id: result.id ?? '', display: planned.display });
+      }
+      mutate((s) => { s.createdResources = created; s.phase = 'complete'; s.activity = undefined; });
+      return { ok: true, written: created.map((c) => `${c.resourceType}/${c.id}`), note: 'Announce in ONE line that the plan is on the chart.' };
+    } catch (e: any) {
+      mutate((s) => { s.phase = 'recoverable-error'; s.error = `Chart write failed: ${String(e?.message || e).slice(0, 160)} — retry available`; s.activity = undefined; });
+      return { error: 'chart write failed — tell the clinician the on-screen button can retry it' };
+    }
+  }
+
   return { error: `unknown function ${name}` };
 }
 
@@ -390,7 +463,7 @@ function councilPrompt(): string {
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
       : '',
     'OPENING: The room assembles in silence and LISTENS. The clinician opens the conference aloud — they present their patient, their theory, and their question, ending with a handoff (e.g. "can you take a look?"). Do NOT speak before the clinician has presented. When they hand off, take the floor: run the chart searches, drive the debate, submit the structured output.',
-    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the strongest dissenting specialist attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then the ADVOCATE (patient advocate) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
+    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the strongest dissenting specialist attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) DECISIONS ARE SPOKEN — the conversation drives everything, the screen only reflects it. After submitting the debate, state the ranked differential in ONE line and ask the clinician to choose; WAIT for their answer. When they state a direction, call select_hypothesis with their words, then propose_workup (include the specialist consultation the standard pathway warrants), then get_benefits, then the ADVOCATE (patient advocate) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. After coverage, ask the clinician whether to write the plan to the chart; ONLY on their explicit spoken confirmation call finalize_to_chart, then announce the write in one line. On-screen buttons are a silent fallback — never tell the clinician to click anything. (6) SPOKEN OUTPUT: after submitting a tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the board shows the detail.',
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
