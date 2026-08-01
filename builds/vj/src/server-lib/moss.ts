@@ -14,6 +14,7 @@ interface MossState {
   client: any | null;
   ready: boolean;
   kicked: boolean;
+  indexedFor?: string; // patientId the index currently holds — reindex on case swap
   loadPromise: Promise<void> | null;
 }
 if (!g.__housemd_moss) g.__housemd_moss = { client: null, ready: false, kicked: false, loadPromise: null } as MossState;
@@ -36,8 +37,9 @@ async function getClient(): Promise<any | null> {
 
 // Fire-and-forget at assemble: upsert the chart snippets, then load the index.
 export function kickChartIndex(chart: LoadedChart): void {
-  if (st.kicked) return;
-  st.kicked = true;
+  if (st.indexedFor === chart.patientId) return;
+  st.indexedFor = chart.patientId;
+  st.ready = false; // stale-index queries would misattribute aliases across patients
   void (async () => {
     const c = await getClient();
     if (!c) return;
