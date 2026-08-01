@@ -215,6 +215,45 @@ input[type='text']::placeholder { color: var(--muted); }
 }
 .seat.speaking { outline: 3px solid var(--teal); outline-offset: 1px; }
 
+/* ---------- the detective board (drawn on the table) ---------- */
+.board {
+  position: absolute;
+  inset: 34px 26px;
+  z-index: 1;
+  border-radius: 22px;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 6px rgba(255, 254, 250, 0.65), var(--shadow-soft);
+}
+.board-svg svg { display: block; width: 100%; height: 100%; }
+.board-note {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  font-family: var(--serif);
+  font-style: italic;
+  color: var(--muted);
+}
+.board-badge {
+  position: absolute;
+  left: 14px;
+  bottom: 12px;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: rgba(20, 18, 14, 0.72);
+  color: #fff;
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+.board-badge.err { background: rgba(150, 30, 20, 0.85); }
+/* With the board up, the case record docks right so the evidence stays readable. */
+.center.with-board {
+  max-width: 430px;
+  margin-left: auto;
+  background: rgba(255, 253, 247, 0.95);
+  backdrop-filter: blur(2px);
+}
+
 /* ---------- the case record (center) ---------- */
 .center {
   position: relative;

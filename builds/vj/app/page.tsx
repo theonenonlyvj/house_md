@@ -166,6 +166,38 @@ function useMic(): { state: 'off' | 'muted' | 'live'; toggle: () => void } {
   return { state: uiState, toggle };
 }
 
+// The detective board: an SVG drawn server-side for the exact pixel size of the table
+// and re-drawn whenever the session state version moves — new evidence, new board.
+function useBoard(version: number | undefined, on: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState('');
+  const [drawing, setDrawing] = useState(false);
+  const [failed, setFailed] = useState('');
+  const drawnKey = useRef('');
+  useEffect(() => {
+    if (!on || version == null || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (w < 200 || h < 200) return;
+    const k = `${version}:${w}x${h}`;
+    if (drawnKey.current === k) return;
+    drawnKey.current = k;
+    let alive = true;
+    setDrawing(true);
+    fetch(`/api/whiteboard?w=${w}&h=${h}`)
+      .then((res) => res.json())
+      .then((d) => {
+        if (!alive) return;
+        if (d.svg) { setSvg(d.svg); setFailed(''); } else setFailed(d.error || 'board unavailable');
+      })
+      .catch(() => alive && setFailed('board unavailable'))
+      .finally(() => alive && setDrawing(false));
+    return () => { alive = false; };
+  }, [version, on]);
+  return { ref, svg, drawing, failed };
+}
+
 // Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
 function initials(name?: string): string {
   if (!name) return '·';
@@ -204,7 +236,10 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [boardOn, setBoardOn] = useState(true);
   const mic = useMic();
+  const hasEvidence = !!s && (s.differential.length > 0 || s.contributions.length > 0 || s.transcript.length > 0);
+  const board = useBoard(s?.version, boardOn && hasEvidence);
   useChairAudio(s?.activity === 'hearing you…');
 
   useEffect(() => {
@@ -289,7 +324,19 @@ export default function Page() {
             );
           })}
 
-          <div className="center">
+          {boardOn && hasEvidence && (
+            <div className="board" ref={board.ref}>
+              {board.svg ? (
+                <div className="board-svg" dangerouslySetInnerHTML={{ __html: board.svg }} />
+              ) : (
+                <div className="board-note">{board.failed || 'pinning the evidence…'}</div>
+              )}
+              {board.drawing && board.svg && <div className="board-badge">re-drawing…</div>}
+              {board.failed && board.svg && <div className="board-badge err">{board.failed}</div>}
+            </div>
+          )}
+
+          <div className={`center${boardOn && hasEvidence ? ' with-board' : ''}`}>
             {s.phase === 'differential-ready' && !s.selectedHypothesisId && (
               <div className="yourmove">⚖️ The council rests — <strong>your call, doctor</strong>: select the leading diagnosis below.</div>
             )}
@@ -400,6 +447,9 @@ export default function Page() {
                 🩺 Assemble council
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
+              <button onClick={() => setBoardOn((v) => !v)} title="Detective board — re-drawn as evidence lands">
+                {boardOn ? '🧵 board on' : '🧵 board off'}
+              </button>
             </div>
             <button
               className={`primary ptt ${mic.state === 'live' ? 'talking' : ''}`}
