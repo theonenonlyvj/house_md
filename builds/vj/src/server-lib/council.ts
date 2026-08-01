@@ -265,6 +265,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
   }
 
   if (name === 'propose_workup') {
+    const CONSULT_RE = /consult|referral|specialist|clinic visit|evaluation by/i;
     mutate((s) => {
       s.workup = (args.options || []).slice(0, 4).map((o: any, i: number) => ({
         id: `opt-${i + 1}`,
@@ -273,6 +274,19 @@ async function runTool(name: string, args: any): Promise<unknown> {
         priority: ['now', 'next', 'later'].includes(o.priority) ? o.priority : 'next',
         selected: true,
       }));
+      // Pathway floor (config, not generation): the standard pathway includes a
+      // specialist consultation; if the model omitted it, append the case-config one
+      // so the coverage/referral beat always has its anchor. Badged in UI.
+      if (!s.workup.some((o) => CONSULT_RE.test(o.display))) {
+        s.workup.push({
+          id: `opt-${s.workup.length + 1}`,
+          display: 'Cardiology consultation',
+          purpose: 'Specialist evaluation for the leading direction (standard pathway step)',
+          priority: 'next',
+          selected: true,
+          sequenceNote: 'added per standard pathway',
+        });
+      }
       s.phase = 'workup-ready';
       s.activity = undefined;
     });
