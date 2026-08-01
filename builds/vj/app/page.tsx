@@ -107,11 +107,12 @@ function useChairAudio(interrupted: boolean) {
   }, []);
 }
 
-// Always-on mic. Setup (permission + WS + worklet) happens on mount, then audio
-// streams continuously to the session's nova-3 listen leg; its VAD handles turns
-// and barge-in without another demo control or click.
-function useMic() {
-  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean }>({ live: false });
+// Always-on mic (setup on mount — zero click latency) with INSTANT mute/unmute.
+// While muted we stream zero-frames so Deepgram's turn detection never sees a stalled
+// stream; unmute is a pure flag flip. Default MUTED so room side-talk can't barge in.
+function useMic(): { state: 'off' | 'muted' | 'live'; toggle: () => void } {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean; muted: boolean }>({ live: false, muted: true });
+  const [uiState, setUiState] = useState<'off' | 'muted' | 'live'>('off');
   useEffect(() => {
     let cancelled = false;
     const unlock = () => { void ref.current.ctx?.resume(); };
@@ -135,11 +136,12 @@ function useMic() {
         node.port.onmessage = (e) => {
           const cur = ref.current;
           if (!cur.ws || cur.ws.readyState !== 1) return;
-          cur.ws.send(e.data);
+          cur.ws.send(cur.muted ? new ArrayBuffer((e.data as ArrayBuffer).byteLength) : e.data);
         };
         src.connect(node);
-        ws.onclose = () => { ref.current.live = false; };
-        ref.current = { ws, ctx, stream, live: true };
+        ws.onclose = () => { ref.current.live = false; setUiState('off'); };
+        ref.current = { ws, ctx, stream, live: true, muted: true };
+        setUiState('muted');
       } catch {}
     };
     void start();
@@ -151,9 +153,17 @@ function useMic() {
       current.stream?.getTracks().forEach((track) => track.stop());
       current.ws?.close();
       if (current.ctx) void current.ctx.close();
-      ref.current = { live: false };
+      ref.current = { live: false, muted: true };
     };
   }, []);
+  const toggle = useCallback(() => {
+    const r = ref.current;
+    if (!r.live) return;
+    r.muted = !r.muted;
+    void r.ctx?.resume();
+    setUiState(r.muted ? 'muted' : 'live');
+  }, []);
+  return { state: uiState, toggle };
 }
 
 // Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
@@ -194,7 +204,7 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  useMic();
+  const mic = useMic();
   useChairAudio(s?.activity === 'hearing you…');
 
   useEffect(() => {
@@ -391,6 +401,13 @@ export default function Page() {
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
             </div>
+            <button
+              className={`primary ptt ${mic.state === 'live' ? 'talking' : ''}`}
+              disabled={s.phase === 'case-ready'}
+              onClick={mic.toggle}
+            >
+              {mic.state === 'live' ? '🔴 MIC LIVE — click to mute' : mic.state === 'muted' ? '🎙 Mic muted — click to speak' : '🎙 Enable mic'}
+            </button>
             <div className="row">
               <input
                 type="text"
