@@ -207,7 +207,8 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 .board {
   position: relative;
   flex: 1;
-  min-height: 0;
+  /* the scroll container would let flex squash this to nothing when the dx rows are up */
+  min-height: 320px;
   border-radius: 12px;
   overflow: hidden;
   border: 1px solid var(--line);
