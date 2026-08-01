@@ -331,6 +331,23 @@ async function runTool(name: string, args: any): Promise<unknown> {
         s.phase = 'benefits-ready';
         s.activity = undefined;
       });
+      // The reimbursement seat speaks the facts herself — composed ONLY from the
+      // returned response, in her own voice, queued behind current speech.
+      const okafor = ROSTER.find((r) => r.kind === 'reimbursement');
+      if (okafor?.voice) {
+        const referralMsg = facts.messages.find((m) => /referral/i.test(m));
+        const line = [
+          'Coverage check is back.',
+          facts.planActive ? 'The plan is active.' : 'The plan shows inactive.',
+          facts.copay ? `Specialist visits carry a ${facts.copay.replace('$', '')} dollar copay.` : '',
+          facts.deductibleRemaining === '$0' ? 'The deductible is already met.' : '',
+          facts.oopRemaining ? `${facts.oopRemaining.replace('$', '')} dollars left on the out-of-pocket max.` : '',
+          referralMsg ? 'One gate: the payer requires a P C P referral before the specialist visit — I have re-sequenced the consult behind it. Labs proceed now.' : '',
+          'Payer-reported figures, not guarantees.',
+        ].filter(Boolean).join(' ');
+        live.pendingLines.push({ name: okafor.name, voice: okafor.voice, text: line, personaId: okafor.id });
+        setTimeout(() => void speakPendingLines(), 3000);
+      }
       return {
         facts: {
           planActive: facts.planActive,
@@ -338,7 +355,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
           deductibleRemaining: facts.deductibleRemaining,
           outOfPocketRemaining: facts.oopRemaining,
           payerMessages: facts.messages,
-          note: 'Speak ONLY these facts. Labs have no service-specific rows — say so. The consult re-sequences behind the referral.',
+          note: 'Ms. Okafor has ALREADY spoken these facts aloud — do NOT repeat the numbers; just move the discussion forward.',
         },
       };
     } catch (e: any) {
@@ -528,6 +545,19 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
 
   ws.on('error', (e: any) => {
     if (ws === live.ws) mutate((s) => { s.phase = 'recoverable-error'; s.error = `Voice session error: ${String(e.message || e).slice(0, 150)} — retry available`; });
+  });
+
+  ws.on('close', () => {
+    // An unexpected drop must never look like a hang — announce it with a retry.
+    if (ws === live.ws && live.ready) {
+      live.ready = false;
+      mutate((s) => {
+        if (s.phase !== 'complete' && s.phase !== 'recoverable-error') {
+          s.phase = 'recoverable-error';
+          s.error = 'Voice session closed unexpectedly — retry re-assembles the council (board state is kept)';
+        }
+      });
+    }
   });
 }
 
