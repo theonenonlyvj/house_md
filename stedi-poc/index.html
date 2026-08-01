@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Will insurance cover it? — Stedi sandbox demo</title>
+<style>
+  :root { font-size: 17px; }
+  body { font-family: system-ui, sans-serif; max-width: 840px; margin: 1.6rem auto; padding: 0 1rem; }
+  h2 { margin-bottom: .2rem; }
+  .badge { display: inline-block; background: #fde68a; color: #713f12; font-size: .7rem; font-weight: 700;
+           padding: .15rem .5rem; border-radius: 4px; vertical-align: middle; margin-left: .5rem; }
+  label { display: block; margin-top: .5rem; font-size: .8rem; color: #555; }
+  input, select { width: 100%; padding: .45rem; font-size: .95rem; box-sizing: border-box; }
+  button { padding: .55rem 1.2rem; font-size: .95rem; cursor: pointer; border-radius: 6px; border: 1px solid #bbb; background: #f4f4f4; }
+  button:disabled { opacity: .5; cursor: wait; }
+  #go { background: #1a7f37; color: #fff; border-color: #1a7f37; font-size: 1.05rem; font-weight: 600; padding: .65rem 1.6rem; }
+  #runAll { background: #1f2937; color: #fff; border-color: #1f2937; }
+  .linkish { background: none; border: none; color: #2563eb; text-decoration: underline; padding: .2rem; font-size: .85rem; }
+  fieldset { border: 1px solid #ddd; border-radius: 8px; margin-top: 1rem; }
+  legend { font-size: .8rem; color: #666; padding: 0 .4rem; }
+  .row { display: flex; gap: .8rem; flex-wrap: wrap; }
+  .row > div { flex: 1; min-width: 150px; }
+  .card { border: 1px solid #ccc; border-radius: 8px; padding: 1rem; margin-top: 1.2rem; }
+  .active { border-color: #2a2; background: #f2fff2; }
+  .inactive { border-color: #b45309; background: #fffbeb; }
+  .rejected { border-color: #c33; background: #fff4f4; }
+  .failed { border-color: #666; background: #f3f4f6; }
+  .chip { display: inline-block; padding: .12rem .55rem; margin: .14rem; border-radius: 999px; font-size: .82rem; background: #e8f0fe; }
+  .chip.no { background: #fde8e8; }
+  .chip.click { cursor: pointer; border: 1px solid #93c5fd; }
+  .benefit { padding: .28rem 0; border-bottom: 1px dotted #ddd; font-size: .9rem; }
+  .meter { padding: .3rem 0; font-size: .92rem; }
+  .meter b { color: #1a7f37; }
+  pre { background: #f6f6f6; padding: .8rem; overflow-x: auto; font-size: .78rem; }
+  .muted { color: #777; font-size: .84rem; }
+  .steps { background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 8px; padding: .6rem .9rem; font-size: .9rem; margin: .8rem 0; }
+  .aaa { margin: .5rem 0; padding: .5rem .7rem; background: #fff; border-left: 3px solid #c33; font-size: .88rem; }
+  .toolbar { display: flex; gap: .9rem; align-items: center; margin-top: 1rem; flex-wrap: wrap; }
+  .transport { font-size: .88rem; }
+  .transport label { display: inline-flex !important; align-items: center; gap: .3rem; margin: 0 .6rem 0 0; white-space: nowrap; }
+  .transport input { width: auto; }
+  .hint { background: #fefce8; border: 1px solid #fde047; border-radius: 8px; padding: .5rem .8rem; margin-top: .8rem; font-size: .9rem; }
+  .hint a { cursor: pointer; color: #2563eb; text-decoration: underline; }
+  .warn { color: #b45309; font-size: .82rem; }
+  .smallprint { font-size: .78rem; color: #888; margin-top: .6rem; }
+  .searchrow { display: flex; gap: .5rem; margin-top: .4rem; }
+  .searchrow input { flex: 1; }
+  #payerResults div { padding: .3rem 0; border-bottom: 1px dotted #ddd; font-size: .88rem; }
+  #board { margin-top: 1rem; }
+  .bgroup { margin: .5rem 0 .2rem; font-size: .82rem; color: #555; font-weight: 600; }
+  .tile { display: inline-block; padding: .3rem .6rem; margin: .15rem; border-radius: 6px; font-size: .8rem;
+          background: #e5e7eb; cursor: pointer; border: 1px solid transparent; }
+  .tile.ok { background: #dcfce7; border-color: #86efac; }
+  .tile.off { background: #fef3c7; border-color: #fcd34d; }
+  .tile.err { background: #fee2e2; border-color: #fca5a5; }
+  .tile.dead { background: #d1d5db; color: #555; }
+  section.result-note { font-size: .85rem; color: #555; margin-top: .3rem; }
+</style>
+</head>
+<body>
+<h2>Will insurance cover it?<span class="badge">TEST MODE — fake patients, no real data</span></h2>
+<p class="muted">An <b>eligibility check</b> asks an insurance company: <i>is this patient covered, and what will they pay?</i>
+Below are <span class="scenCount">34</span> pre-built test patients from Stedi's sandbox. Answers come back in ~1 second.</p>
+<div class="steps"><b>1.</b> Pick a test patient &nbsp;→&nbsp; <b>2.</b> Press <b>Check eligibility</b> &nbsp;→&nbsp; <b>3.</b> Read the card.
+&nbsp; Or press <b>▶ Run all <span class="scenCount">34</span></b> to see everything at once.</div>
+
+<label>Test patient / scenario</label>
+<select id="scenario"></select>
+<p class="muted" id="desc" style="margin:.3rem 0 0"></p>
+<div class="muted" id="meta"></div>
+
+<fieldset><legend>Patient details — <b>editable</b>: change the Member ID or DOB and re-check to watch the payer reject bad data</legend>
+  <div class="row" id="subRow"></div>
+  <div style="margin-top:.4rem"><button id="reset" class="linkish" style="display:none">↺ Reset to scenario defaults</button></div>
+</fieldset>
+<fieldset id="depFields" style="display:none"><legend>Dependent (benefits come back for this person)</legend><div class="row" id="depRow"></div></fieldset>
+
+<div class="toolbar">
+  <button id="go">Check eligibility</button>
+  <button id="runAll">▶ Run all <span class="scenCount">34</span></button>
+  <span class="transport">
+    <label><input type="radio" name="transport" value="rest" checked> HTTPS API</label>
+    <label><input type="radio" name="transport" value="mcp"> MCP server</label>
+    <div class="muted">Same check, two doors: the classic API, or Stedi's MCP server — the interface AI agents call directly. Flip it and re-run: identical answer.</div>
+  </span>
+</div>
+
+<div id="hint" class="hint" style="display:none"></div>
+<div id="result"></div>
+<div id="board"></div>
+
+<p style="margin-top:1rem"><button id="x12" class="linkish">Bonus: see the raw EDI wire format (X12 270 → 271) that runs underneath</button>
+ · <button id="copyLink" class="linkish">🔗 Copy link to this scenario</button></p>
+
+<fieldset>
+  <legend>Find any real insurer — Stedi's payer directory via the MCP <code>search_for_payer</code> tool</legend>
+  <p class="muted" style="margin:.2rem 0">The scenarios above use mock payers. This searches the <b>real</b> directory (thousands of payers) exactly the way an AI agent would. Try:
+    <span class="chip click" data-q="cigna">cigna</span>
+    <span class="chip click" data-q="62308">62308</span>
+    <span class="chip click" data-q="medicare">medicare</span>
+    <span class="chip click" data-q="blue cross texas">blue cross texas</span></p>
+  <div class="searchrow"><input id="payerQ" placeholder="payer name, ID, or alias — fuzzy matching"><button id="payerGo">Search</button></div>
+  <div id="payerResults"></div>
+</fieldset>
+
+<script>
+let groups = [], flat = [];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const money = n => '$' + Number(n).toLocaleString();
+const fmtDate = d => String(d).length === 8 ? `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6)}` : d;
+const STC = { '30': 'general medical', '35': 'dental' };
+
+async function init() {
+  try {
+    const { scenarios } = await (await fetch('/api/scenarios')).json();
+    groups = scenarios;
+    const sel = $('scenario');
+    sel.innerHTML = groups.map(g =>
+      `<optgroup label="${esc(g.group)}">` +
+      g.items.map(s => { flat.push(s); return `<option value="${flat.length - 1}">${esc(s.label)}</option>`; }).join('') +
+      `</optgroup>`).join('');
+    sel.onchange = () => { fill(); history.replaceState(null, '', '?scenario=' + current().key); };
+    const params = new URLSearchParams(location.search);
+    const want = flat.findIndex(s => s.key === params.get('scenario'));
+    if (want >= 0) sel.value = want;
+    document.querySelectorAll('.scenCount').forEach(el => { el.textContent = flat.length; });
+    fill();
+    if (params.get('run') === 'all') $('runAll').click();
+    else runCheck(); // first paint always shows a live result
+  } catch (err) {
+    $('result').innerHTML = `<div class="card failed"><b>Couldn't load scenarios.</b> Is the server running? Start it with:<br>
+      <code>PATH="/opt/homebrew/opt/node/bin:$PATH" node server.mjs</code> — then reload this page.</div>`;
+  }
+}
+
+const current = () => flat[$('scenario').value];
+const FIELD_LABELS = { firstName: 'First name', lastName: 'Last name', dateOfBirth: 'DOB (YYYYMMDD)', memberId: 'Member ID', ssn: 'SSN' };
+
+function personInputs(rowEl, person, prefix) {
+  rowEl.innerHTML = Object.keys(person).map(f =>
+    `<div><label>${FIELD_LABELS[f] || esc(f)}</label><input id="${prefix}_${f}" value="${esc(person[f])}" data-default="${esc(person[f])}"></div>`).join('');
+  rowEl.querySelectorAll('input').forEach(i => i.addEventListener('input', editedCheck));
+}
+
+function editedCheck() {
+  const dirty = [...document.querySelectorAll('#subRow input, #depRow input')].some(i => i.value !== i.dataset.default);
+  $('reset').style.display = dirty ? '' : 'none';
+}
+
+$('reset').onclick = () => {
+  document.querySelectorAll('#subRow input, #depRow input').forEach(i => { i.value = i.dataset.default; });
+  editedCheck();
+};
+
+function fill() {
+  const s = current();
+  $('desc').textContent = s.desc;
+  const enc = s.request.encounter || {};
+  const codes = enc.serviceTypeCodes || [];
+  const svc = codes.length > 2 ? `${codes.length} service types` : codes.map(c => `${STC[c] || c}${STC[c] ? ` (${c})` : ''}`).join(', ');
+  $('meta').innerHTML = `Insurer (payer ID): <b>${esc(s.request.tradingPartnerServiceId)}</b> · asking about: ${esc(svc)}` +
+    (enc.procedureCode ? ` · procedure <b>${esc(enc.procedureCode)}</b>` : '');
+  personInputs($('subRow'), s.request.subscriber, 'sub');
+  const dep = (s.request.dependents || [])[0];
+  $('depFields').style.display = dep ? '' : 'none';
+  if (dep) personInputs($('depRow'), dep, 'dep');
+  editedCheck();
+}
+
+function collectPerson(template, prefix) {
+  const out = {};
+  for (const f of Object.keys(template)) out[f] = $(`${prefix}_${f}`).value.trim();
+  return out;
+}
+
+// ---------- benefit rendering ----------
+
+function entityName(e) {
+  if (!e) return '';
+  return [e.entityFirstname, e.entityMiddlename, e.entityName].filter(Boolean).join(' ');
+}
+function entityContact(e) {
+  const c = (e?.contactInformation?.contacts || []).map(x => x.communicationNumber).filter(Boolean);
+  return c.join(' · ');
+}
+function delivery(b) {
+  return (b.benefitsServiceDelivery || []).map(d =>
+    [d.quantity, d.quantityQualifier, 'per', d.numOfPeriods, d.timePeriodQualifier].filter(Boolean).join(' ')
+      .replace(/\bper$/, '').trim()).filter(Boolean).join('; ');
+}
+function rowBits(b) {
+  return [
+    b.benefitAmount != null ? money(b.benefitAmount) : (b.benefitPercent != null ? (b.benefitPercent * 100).toFixed(0) + '%' : ''),
+    b.compositeMedicalProcedureIdentifier?.procedureCode,
+    b.coverageLevel, b.inPlanNetworkIndicatorCode === 'Y' ? 'in-network' : b.inPlanNetworkIndicatorCode === 'N' ? 'out-of-network' : '',
+    b.timeQualifier, b.insuranceType,
+    (b.serviceTypes || []).slice(0, 3).join(', '),
+    delivery(b),
+    b.benefitsDateInformation?.service ? 'svc date ' + fmtDate(b.benefitsDateInformation.service) : '',
+    (b.additionalInformation || []).map(a => a.description).join(' · '),
+  ].filter(Boolean).map(esc).join(' · ');
+}
+
+// Pair Total / Year-to-Date / Remaining rows (deductible + out-of-pocket) into one meter line.
+function buildMeters(benefits) {
+  const consumed = new Set();
+  const meters = [];
+  const groupsOf = {};
+  for (const b of benefits) {
+    if (b.code !== 'C' && b.code !== 'G') continue;
+    const k = [b.code, b.coverageLevelCode, b.inPlanNetworkIndicatorCode, (b.serviceTypeCodes || []).join()].join('|');
+    (groupsOf[k] = groupsOf[k] || []).push(b);
+  }
+  for (const rows of Object.values(groupsOf)) {
+    const get = tq => rows.find(r => r.timeQualifier === tq && r.benefitAmount != null);
+    const total = get('Calendar Year') || get('Contract'), spent = get('Year to Date'), left = get('Remaining');
+    if (total && (spent || left) && rows.length >= 2) {
+      rows.forEach(r => consumed.add(r));
+      const name = rows[0].name + (rows[0].coverageLevel ? ` (${rows[0].coverageLevel})` : '');
+      meters.push(`<div class="meter">${esc(name)}: ${money(total.benefitAmount)} total` +
+        (spent ? ` · ${money(spent.benefitAmount)} spent` : '') +
+        (left ? ` · <b>${money(left.benefitAmount)} remaining</b>` : '') + `</div>`);
+    }
+  }
+  return { meters, consumed };
+}
+
+function aaaBlock(e) {
+  return `<div class="aaa"><b>Rejection code AAA ${esc(e.code || e.field || '')}</b> — ${esc(e.description || '')}
+    ${e.followupAction ? `<br><b>Follow-up:</b> ${esc(e.followupAction)}` : ''}
+    ${e.possibleResolutions ? `<br><b>How to fix:</b> ${esc(e.possibleResolutions)}` : ''}</div>`;
+}
+
+const chips = (types, cls) => [...new Set(types)].map(t => `<span class="chip ${cls}">${esc(t)}</span>`).join('');
+
+let promptsHtml = null;
+async function agentGuidance() {
+  if (promptsHtml !== null) return promptsHtml;
+  try {
+    const { prompts } = await (await fetch('/api/mcp-prompts')).json();
+    promptsHtml = (prompts || []).length
+      ? `<details style="margin-top:.6rem"><summary>🤖 What Stedi's MCP server tells an AI agent to do about errors like this (${prompts.length} built-in prompts)</summary>` +
+        prompts.map(p => `<p><b>${esc(p.name)}</b> — ${esc(p.description)}</p><pre>${esc(p.text.slice(0, 3000))}</pre>`).join('') + `</details>`
+      : '';
+  } catch { promptsHtml = ''; }
+  return promptsHtml;
+}
+
+function summarize(data, scen) {
+  const deps = data.dependents || [];
+  const aaaAll = [ ...(data.subscriber?.aaaErrors || []), ...deps.flatMap(d => d.aaaErrors || []), ...(data.errors || []) ];
+  const aaa = [...new Map(aaaAll.map(e => [`${e.code}|${e.description}`, e])).values()];
+  if (data.error) return `<div class="card failed"><b>Request failed</b><br>${esc(data.error)}</div>`;
+  if (aaa.length)
+    return `<div class="card rejected"><b>❌ Check rejected by the payer</b>
+      ${scen ? `<div class="muted">${esc(scen.desc)}</div>` : ''}
+      ${aaa.map(aaaBlock).join('')}
+      <div id="promptSlot"></div>${footer(data)}</div>`;
+
+  const benefits = data.benefitsInformation || [];
+  const isActive = benefits.some(b => b.code === '1') || (data.planStatus || []).some(s => s.statusCode === '1');
+  const isInactive = !isActive && (benefits.some(b => b.code === '6') || (data.planStatus || []).some(s => s.statusCode === '6'));
+  const planName = data.planInformation?.groupDescription
+      || (data.planStatus || []).map(s => s.planDetails).find(Boolean) || '—';
+  const sub = data.subscriber || {};
+  const patient = deps.length ? deps[0] : sub;
+
+  // covered / not-covered maps, grouped by insurance type when present (Medicare Part A/B)
+  const coveredGroups = {};
+  for (const b of benefits.filter(b => b.code === '1'))
+    (coveredGroups[b.insuranceType || ''] = coveredGroups[b.insuranceType || ''] || []).push(...(b.serviceTypes || []));
+  const notCovered = benefits.filter(b => b.code === 'I').flatMap(b => b.serviceTypes || []);
+  const coveredHtml = Object.entries(coveredGroups).filter(([, v]) => v.length).map(([k, v]) =>
+    `<div style="margin-top:.4rem"><b>Covered${k ? ` — ${esc(k)}` : ''}:</b> ${chips(v, '')}</div>`).join('');
+
+  const { meters, consumed } = buildMeters(benefits);
+  const costShare = benefits.filter(b => 'ABCGF'.includes(b.code) && !consumed.has(b));
+  const row = b => `<div class="benefit"><b>${esc(b.name || b.code)}</b> ${rowBits(b)}</div>`;
+  const head = costShare.slice(0, 14).map(row).join('');
+  const rest = costShare.length > 14
+    ? `<details><summary class="muted">…show all ${costShare.length} rows</summary>${costShare.slice(14).map(row).join('')}</details>` : '';
+
+  // prior auth flags on any row
+  const auth = benefits.filter(b => b.authOrCertIndicator === 'Y');
+  const authHtml = auth.length ? `<div class="warn">⚠ Prior authorization / referral may be required` +
+    ` ${esc([...new Set(auth.flatMap(b => (b.additionalInformation || []).map(a => a.description)))].join(' · '))}</div>` : '';
+
+  // other parties: L=PCP, R=other payer, U=contact entity, N/X=restricted/facility
+  const parties = benefits.filter(b => 'LRUNX'.includes(b.code) && (b.benefitsRelatedEntity || b.benefitsRelatedEntities))
+    .map(b => {
+      const e = b.benefitsRelatedEntity || (b.benefitsRelatedEntities || [])[0];
+      const what = { L: 'Primary care provider', R: 'Another payer on file', U: 'Contact for ' + ((b.serviceTypes || ['info']).join(', ')), N: 'Services restricted to', X: 'Facility' }[b.code];
+      const bits = [entityName(e), e?.entityIdentificationValue ? 'NPI ' + e.entityIdentificationValue : '', entityContact(e),
+        b.insuranceType || '', e?.address ? [e.address.address1, e.address.city].filter(Boolean).join(', ') : ''].filter(Boolean).map(esc).join(' · ');
+      return `<div class="benefit">👥 <b>${esc(what)}:</b> ${bits}</div>`;
+    }).join('');
+
+  const fine = benefits.filter(b => 'PE'.includes(b.code))
+    .flatMap(b => (b.additionalInformation || []).map(a => a.description)).filter(Boolean);
+
+  const pd = data.planDateInformation || {};
+  const planDates = pd.planBegin || pd.plan || pd.planEnd
+    ? `<div class="muted">Plan dates: ${esc([pd.planBegin && fmtDate(pd.planBegin), pd.planEnd && fmtDate(pd.planEnd), pd.plan].filter(Boolean).join(' → '))}</div>` : '';
+
+  const isMbi = data.tradingPartnerServiceId === 'MBILU';
+  const payerContact = entityContact({ contactInformation: data.payer?.contactInformation });
+
+  return `<div class="card ${isActive ? 'active' : isInactive ? 'inactive' : 'failed'}">
+    <b>${isActive ? '✅ Plan active — patient is covered' : isInactive ? '⛔ Coverage inactive — not covered' : '❓ No clear answer returned'}</b>
+    ${scen ? `<div class="muted">${esc(scen.desc)}</div>` : ''}
+    <div class="muted">${esc([patient.firstName, patient.lastName].filter(Boolean).join(' '))}${deps.length ? ` (dependent of ${esc([sub.firstName, sub.lastName].filter(Boolean).join(' '))})` : ''}
+      · ${esc(data.payer?.name || '')}${payerContact ? ' · ' + esc(payerContact) : ''}${!isMbi && sub.memberId ? ' · member ' + esc(sub.memberId) : ''}</div>
+    ${isMbi ? `<div><b>Medicare number (MBI) found from SSN:</b> ${esc(sub.memberId || '?')}</div>` : ''}
+    <div>Plan: ${esc(planName)}</div>
+    ${planDates}
+    ${authHtml}
+    ${coveredHtml}
+    ${notCovered.length ? `<div style="margin-top:.4rem"><b>Not covered:</b> ${chips(notCovered, 'no')}</div>` : ''}
+    ${meters.length ? `<div style="margin-top:.4rem">${meters.join('')}</div>` : ''}
+    <div style="margin-top:.4rem">${head || '<span class="muted">No cost-share rows returned.</span>'}${rest}</div>
+    ${parties ? `<div style="margin-top:.4rem">${parties}</div>` : ''}
+    ${fine.length ? `<div class="smallprint">${esc(fine.join(' — '))}</div>` : ''}
+    ${footer(data)}
+  </div>`;
+}
+
+function footer(data) {
+  return `${data.eligibilitySearchId ? `<div class="smallprint">Real API transaction — search ID <code>${esc(data.eligibilitySearchId)}</code>
+    · <a href="https://portal.stedi.com/app/healthcare/eligibility" target="_blank">view in Stedi portal ↗</a></div>` : ''}`;
+}
+
+function x12Details(data, sentX12) {
+  const seg = s => esc(String(s)).split('~').join('~\n');
+  return (sentX12 ? `<details style="margin-top:.6rem"><summary>The 270 request in raw EDI (what this looked like in 1996)</summary><pre>${seg(sentX12)}</pre></details>` : '') +
+    (data.x12 ? `<details style="margin-top:.4rem"><summary>The 271 reply the payer sent back (raw EDI) — Stedi translated it into the card above</summary><pre>${seg(data.x12)}</pre></details>` : '');
+}
+
+function show(payload, tag, scen) {
+  const data = payload.data || payload;
+  if (payload.isError || (payload.httpStatus && payload.httpStatus >= 400)) {
+    $('result').innerHTML = `<div class="card failed"><b>Request failed (${payload.isError ? 'MCP tool error' : 'HTTP ' + payload.httpStatus})</b>
+      <pre>${esc(JSON.stringify(data, null, 2).slice(0, 2000))}</pre></div>`;
+    return;
+  }
+  $('result').innerHTML = summarize(data, scen) +
+    x12Details(data, payload.sentX12) +
+    `<details style="margin-top:.6rem"><summary class="muted">Raw JSON — ${esc(tag)}</summary><pre>${esc(JSON.stringify(data, null, 2))}</pre></details>`;
+  const slot = $('promptSlot');
+  if (slot) agentGuidance().then(h => { if (h) slot.innerHTML = h; });
+}
+
+// ---------- guided hints ----------
+const HINTS = [
+  { text: 'Now see a denial: try <a data-h="scenario" data-key="uhc-inactive">UnitedHealthcare — inactive member</a>.' },
+  { text: 'Break it yourself: change the Member ID to anything and press Check — the payer rejects it with an exact reason.' },
+  { text: 'Flip the toggle to <a data-h="mcp">MCP server</a> and re-run — same answer through the door AI agents use.' },
+  { text: 'See Medicare say what it will NOT cover: try <a data-h="scenario" data-key="cms">CMS (Medicare)</a>.' },
+  { text: 'Dental depth: <a data-h="scenario" data-key="dental-ameritas">Ameritas</a> returns 384 rows — per-procedure percentages, annual max, “2 cleanings per year”.' },
+  { text: 'Finish with the <a data-h="x12">raw EDI view</a> — the 1990s wire format Stedi translates away.' },
+];
+let hintIdx = 0;
+function nextHint() {
+  if (hintIdx >= HINTS.length) { $('hint').style.display = 'none'; return; }
+  $('hint').innerHTML = '💡 ' + HINTS[hintIdx].text;
+  $('hint').style.display = '';
+  hintIdx++;
+  $('hint').querySelectorAll('a').forEach(a => a.onclick = () => {
+    if (a.dataset.h === 'scenario') { selectScenario(a.dataset.key); runCheck(); }
+    if (a.dataset.h === 'mcp') { document.querySelector('input[name=transport][value=mcp]').checked = true; runCheck(); }
+    if (a.dataset.h === 'x12') $('x12').click();
+  });
+}
+function selectScenario(key) {
+  const i = flat.findIndex(s => s.key === key);
+  if (i >= 0) { $('scenario').value = i; fill(); history.replaceState(null, '', '?scenario=' + key); }
+}
+
+// ---------- actions ----------
+
+async function runCheck() {
+  const s = current();
+  const transport = document.querySelector('input[name=transport]:checked').value;
+  const request = { ...s.request, subscriber: collectPerson(s.request.subscriber, 'sub') };
+  if (s.request.dependents) request.dependents = [collectPerson(s.request.dependents[0], 'dep')];
+  const dob = request.subscriber.dateOfBirth;
+  const dobWarn = dob !== undefined && !/^\d{8}$/.test(dob)
+    ? `<div class="warn">Heads-up: DOB "${esc(dob)}" isn't YYYYMMDD — sending anyway so you can see how the payer reacts.</div>` : '';
+  $('go').disabled = true;
+  $('result').innerHTML = dobWarn + `<p class="muted">Asking ${esc(s.request.tradingPartnerServiceId)} via ${transport === 'mcp' ? 'MCP' : 'HTTPS API'}…</p>`;
+  try {
+    const res = await fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request, transport }) });
+    const payload = await res.json();
+    show(payload, payload.transport === 'mcp'
+      ? `via MCP tools/call · ${payload.ms} ms` : `via HTTPS API · HTTP ${payload.httpStatus} · ${payload.ms} ms`, s);
+    nextHint();
+  } catch (err) {
+    $('result').innerHTML = `<div class="card failed">Couldn't reach the demo server — is it still running? (${esc(err)})</div>`;
+  } finally { $('go').disabled = false; }
+}
+$('go').onclick = runCheck;
+
+$('x12').onclick = async () => {
+  $('x12').disabled = true;
+  $('result').innerHTML = '<p class="muted">Sending the raw X12 270 (Aetna dependent sample)…</p>';
+  try {
+    const payload = await (await fetch('/api/check-x12', { method: 'POST' })).json();
+    show(payload, `raw X12 270 in → JSON out · HTTP ${payload.httpStatus} · ${payload.ms} ms`);
+    document.querySelector('#result details')?.setAttribute('open', '');
+  } catch (err) {
+    $('result').innerHTML = `<div class="card failed">Couldn't reach the demo server. (${esc(err)})</div>`;
+  } finally { $('x12').disabled = false; }
+};
+
+$('copyLink').onclick = async () => {
+  const url = `${location.origin}/?scenario=${current().key}&run=1`;
+  try { await navigator.clipboard.writeText(url); $('copyLink').textContent = '✓ Link copied'; }
+  catch { prompt('Copy this link:', url); }
+  setTimeout(() => { $('copyLink').textContent = '🔗 Copy link to this scenario'; }, 1500);
+};
+
+// ---------- run-all board ----------
+
+$('runAll').onclick = async () => {
+  $('runAll').disabled = true;
+  const board = $('board');
+  board.innerHTML = `<div class="card"><b>Running every scenario…</b> <span class="muted">green = covered · amber = inactive · red = rejected (on purpose) · click any tile to inspect</span>
+    <div id="tiles"></div></div>`;
+  const tiles = $('tiles');
+  const jobs = [];
+  for (const g of groups) {
+    tiles.insertAdjacentHTML('beforeend', `<div class="bgroup">${esc(g.group)}</div>`);
+    for (const s of g.items) {
+      const id = 'tile-' + s.key;
+      tiles.insertAdjacentHTML('beforeend', `<span class="tile" id="${id}">⏳ ${esc(s.label)}</span>`);
+      jobs.push(async () => {
+        try {
+          const res = await fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ request: s.request, transport: 'rest' }) });
+          const payload = await res.json();
+          const d = payload.data || {};
+          const aaa = [...(d.subscriber?.aaaErrors || []), ...(d.errors || []), ...((d.dependents || []).flatMap(x => x.aaaErrors || []))];
+          const active = (d.benefitsInformation || []).some(b => b.code === '1') || (d.planStatus || []).some(x => x.statusCode === '1');
+          const t = $(id);
+          if (aaa.length) { t.className = 'tile err'; t.textContent = `❌ ${s.label}${s.label.includes('AAA') ? '' : ` (AAA ${aaa[0].code})`}`; }
+          else if (active) { t.className = 'tile ok'; t.textContent = `✅ ${s.label}`; }
+          else { t.className = 'tile off'; t.textContent = `⛔ ${s.label}`; }
+          t.onclick = () => { selectScenario(s.key); show(payload, 'from Run-all board · via HTTPS API', s); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+        } catch {
+          const t = $(id); t.className = 'tile dead'; t.textContent = `🔌 ${s.label}`;
+        }
+      });
+    }
+  }
+  // 4 at a time
+  const queue = [...jobs];
+  await Promise.all(Array.from({ length: 4 }, async () => { while (queue.length) await queue.shift()(); }));
+  $('runAll').disabled = false;
+};
+
+// ---------- payer search ----------
+
+async function payerSearch(q) {
+  const box = $('payerResults');
+  if (!q) { box.innerHTML = '<p class="muted">Type a payer name or ID first (or click an example above).</p>'; return; }
+  box.innerHTML = '<p class="muted">Searching via MCP…</p>';
+  $('payerGo').disabled = true;
+  try {
+    const { data, error } = await (await fetch('/api/payer-search?q=' + encodeURIComponent(q))).json();
+    if (error) { box.innerHTML = `<p class="warn">${esc(error)}</p>`; return; }
+    const items = data?.items || [];
+    box.innerHTML = items.slice(0, 8).map(({ payer: p }) =>
+      `<div><b>${esc(p.displayName)}</b> · payer ID <code>${esc(p.primaryPayerId)}</code>
+       · ${esc((p.coverageTypes || []).join('/'))}
+       ${p.transactionSupport?.eligibilityCheck ? '· eligibility: ' + esc(p.transactionSupport.eligibilityCheck) : ''}</div>`).join('')
+      || '<p class="muted">No results.</p>';
+  } catch (err) {
+    box.innerHTML = `<p class="warn">Search failed — server unreachable? (${esc(err)})</p>`;
+  } finally { $('payerGo').disabled = false; }
+}
+$('payerGo').onclick = () => payerSearch($('payerQ').value.trim());
+$('payerQ').addEventListener('keydown', e => { if (e.key === 'Enter') $('payerGo').click(); });
+document.querySelectorAll('.chip.click').forEach(c => c.onclick = () => { $('payerQ').value = c.dataset.q; payerSearch(c.dataset.q); });
+
+init();
+</script>
+</body>
+</html>
