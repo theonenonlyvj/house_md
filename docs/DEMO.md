@@ -1,7 +1,7 @@
 # house_md — two-minute video brief
 
 Status: production constraint. Write the final screenplay only after clinically
-reviewing the locked patient and insurance profile in [`PLAN.md`](./PLAN.md).
+reviewing the locked patient and insurance profile in [`PLAN-V2.md`](./PLAN-V2.md).
 
 ## Hard limit
 
@@ -14,8 +14,9 @@ The final video must show, not merely describe:
 
 1. a synthetic patient record loaded from Medplum;
 2. clinician audio processed by Deepgram;
-3. a Moss evidence search returning Medplum-backed citations;
-4. a differential that changes in response to the retrieved evidence;
+3. the minimum council and visible empty-seat guardrail;
+4. a Moss evidence search returning Medplum-backed citations and changing the
+   differential;
 5. a live Stedi test-mode response projected into the workup;
 6. explicit clinician confirmation;
 7. the resulting `ClinicalImpression` and proposed `ServiceRequest` resources in
@@ -38,7 +39,7 @@ The eventual screenplay should use only these beats:
 
 - problem and patient context;
 - one spoken clinician turn;
-- one evidence-driven differential change;
+- council seating and one evidence-driven differential change;
 - one selected workup;
 - one insurance reveal;
 - one clinician confirmation and FHIR result;

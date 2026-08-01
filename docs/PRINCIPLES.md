@@ -1,7 +1,8 @@
 # house_md — guiding principles
 
-This document explains the product and decisions that shape [`PLAN.md`](./PLAN.md). It is
-the reference for resolving ambiguity during implementation.
+This document explains the product and decisions that shape
+[`PLAN-V2.md`](./PLAN-V2.md). It is the reference for resolving ambiguity during
+implementation.
 
 ## Product definition
 
@@ -17,6 +18,10 @@ a projected display without operating the product.
 The primary surface is the **Living Differential Canvas**, a spatial workspace where
 retrieved evidence visibly supports or contradicts competing hypotheses. Conversation
 drives the artifact but does not dominate the interface.
+
+The product is one Next.js application. The whiteboard is the product surface; voice,
+evidence inspection, workup, benefits, and FHIR confirmation support that surface
+instead of becoming separate applications or dashboards.
 
 The product should feel calm, precise, and credible: a focused clinical instrument in
 a bright conference room. It must not resemble a legacy EHR, generic chatbot,
@@ -173,15 +178,12 @@ real clinical workflow promotes them.
 Teams can work in parallel when they agree on event and data contracts. The central plan
 defines those contracts without dictating internal implementation.
 
-The voice workstream may change models, prompts, or audio plumbing as long as it emits
-the agreed events. The Stedi workstream may use REST or MCP as long as it returns the
-canonical benefits projection. The UI should consume domain state rather than provider
-payloads directly.
-
-The reasoning runtime owns orchestration of clinical tools. Deepgram owns the voice
-transport, transcription and turn handling, and speech output around that runtime.
-Whether the selected Deepgram configuration uses a managed model or a team-selected
-model must not change the application tool contracts or canonical session state.
+The selected Deepgram Voice Agent owns the conversational pipeline: Flux listening and
+turn handling, a Deepgram-managed model, function calling, and the chair's speech. The
+application remains authoritative for patient data, evidence, council contributions,
+benefits, clinician decisions, and FHIR writes. The Stedi path may use REST or MCP as
+long as it returns the same truthful benefit projection. The whiteboard consumes
+validated application state rather than raw provider payloads.
 
 ## 12. Keep secrets and real patient information out
 
