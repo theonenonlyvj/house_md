@@ -1,6 +1,6 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { ConversationTurn, Seat, SessionState } from '../src/shared/types';
+import type { Argument, ConversationTurn, EvidenceRef, Seat, SessionState } from '../src/shared/types';
 
 // The panel consult room. Decision support, not diagnosis: the panel argues, the
 // clinician decides. One long table — House at the head, you at the foot with the
@@ -250,10 +250,12 @@ export default function Page() {
 
   const seats = s.seating?.seats || [];
   const chairSeat = seats.find((st) => seatRole(st) === 'chair');
-  const sideSeats = seats.filter((st) => st !== chairSeat && st.status !== 'human' && st.status !== 'empty');
-  const half = Math.ceil(sideSeats.length / 2);
-  const leftSeats = sideSeats.slice(0, half);
-  const rightSeats = sideSeats.slice(half);
+  // The panel, in DEMO_SPEC order: chair first, specialists, advocate last.
+  const panelSeats = [
+    ...(chairSeat ? [chairSeat] : []),
+    ...seats.filter((st) => seatRole(st) === 'specialist'),
+    ...seats.filter((st) => seatRole(st) === 'reimb'),
+  ];
   const canConvene = s.phase === 'case-ready' || s.phase === 'recoverable-error';
   // Finalize is gated on the clinical flow: leading dx selected AND a proposed
   // workup with selected options AND the session in a plan-ready phase.
@@ -263,6 +265,18 @@ export default function Page() {
     s.workup.some((o) => o.selected);
   const leading = s.differential.find((d) => d.status === 'leading');
   const allCreated = [...created, ...s.createdResources];
+
+  // The record, cited live: every chart fact the debate has resolved so far,
+  // deduped by alias — this is real Medplum data surfacing in real time.
+  const evidence: EvidenceRef[] = [];
+  {
+    const seen = new Set<string>();
+    const collect = (a?: Argument) =>
+      a?.resolved.forEach((e) => { if (!seen.has(e.alias)) { seen.add(e.alias); evidence.push(e); } });
+    s.contributions.forEach((c) => { collect(c.interpretation); collect(c.contradiction); });
+    s.differential.forEach((d) => { d.supporting.forEach(collect); d.contradicting.forEach(collect); });
+    evidence.sort((a, b) => Number(a.alias.replace(/\D/g, '')) - Number(b.alias.replace(/\D/g, '')));
+  }
   const status = s.activity || PHASE_STATUS[s.phase] || '';
   const yourMove =
     s.phase === 'listening'
@@ -325,30 +339,44 @@ export default function Page() {
 
       <div className="main">
         <section className="chamber">
-          <div className="head-row">
-            {chairSeat && <SeatPill seat={chairSeat} speaking={hasFloor(chairSeat)} />}
-          </div>
-
-          <div className="table-row">
-            <div className="side left">
-              {leftSeats.map((seat, i) => (
-                <SeatPill key={`l-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
-              ))}
-            </div>
-
-            <div className="table-surface">
-              {s.patient && (
-                <div className="table-head">
+          <div className="whiteboard">
+            {!s.patient && (
+              <div className="wb-empty placeholder">
+                Convene the panel — the patient’s record loads from Medplum and the case unfolds here.
+              </div>
+            )}
+            {s.patient && (
+              <>
+                <div className="wb-patient">
                   <div className="case-name">{s.patient.name}</div>
                   <div className="case-meta">
                     {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
                   </div>
                   {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
                 </div>
-              )}
 
-              <div className="table-plan">
+                <div className="wb-body">
                 {yourMove && <div className="yourmove">{yourMove}</div>}
+
+                {evidence.length > 0 && (
+                  <>
+                    <div className="steps-label">From the record — cited live</div>
+                    <div className="facts">
+                      {evidence.map((e) => (
+                        <button
+                          key={e.alias}
+                          className="fact"
+                          title={e.display}
+                          onClick={() => openCite(e.resourceType, e.resourceId)}
+                        >
+                          <span className="fact-alias">{e.alias}</span>
+                          <span className="fact-text">{e.fact}</span>
+                          {e.date && <span className="fact-date">{e.date.slice(0, 10)}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
 
                 {leading && s.workup.length > 0 && (
                   <div className="leadline">
@@ -408,14 +436,15 @@ export default function Page() {
                   </>
                 )}
                 {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
-              </div>
-            </div>
+                </div>
+              </>
+            )}
+          </div>
 
-            <div className="side right">
-              {rightSeats.map((seat, i) => (
-                <SeatPill key={`r-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
-              ))}
-            </div>
+          <div className="experts">
+            {panelSeats.map((seat, i) => (
+              <SeatPill key={`${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
+            ))}
           </div>
 
           <div className="foot">

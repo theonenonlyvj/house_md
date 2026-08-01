@@ -145,54 +145,37 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   max-width: 340px;
 }
 
-/* ---------- the chamber: head / table / foot ---------- */
+/* ---------- the chamber: whiteboard / experts / foot ---------- */
 .chamber {
   display: flex;
   flex-direction: column;
-  align-items: center;
+  align-items: stretch;
+  gap: 10px;
   min-height: 0;
   min-width: 0;
 }
-.head-row {
-  z-index: 2;
-  min-height: 40px;
-  display: flex;
-  align-items: flex-end;
-  margin-bottom: -19px;
-}
-.table-row {
+/* THE WHITEBOARD — the case, written up live from the Medplum record */
+.whiteboard {
   flex: 1;
   min-height: 0;
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  align-items: stretch;
-}
-.table-surface {
-  width: min(420px, 34vw);
-  border-radius: 30px;
-  background: linear-gradient(180deg, var(--table-1) 0%, var(--table-2) 55%, var(--table-3) 100%);
-  border: 1px solid var(--line);
-  box-shadow:
-    inset 0 0 0 7px rgba(255, 254, 250, 0.65),
-    inset 0 0 0 8px rgba(150, 130, 80, 0.18),
-    var(--shadow-soft);
   display: flex;
   flex-direction: column;
-  min-height: 0;
-  padding: 30px 22px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: inset 0 0 0 5px rgba(22, 35, 58, 0.02), var(--shadow-soft);
+  padding: 20px 24px 14px;
 }
-/* the patient context, at the head of the table */
-.table-head {
+.wb-empty { margin: auto; text-align: center; max-width: 380px; }
+.wb-patient {
   text-align: center;
   padding-bottom: 12px;
-  margin-bottom: 4px;
-  border-bottom: 1px solid rgba(150, 130, 80, 0.22);
+  border-bottom: 1px solid var(--line-cool);
 }
 .case-name {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: 18px;
+  font-size: 19px;
   letter-spacing: 0.01em;
 }
 .case-meta {
@@ -209,26 +192,58 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   line-height: 1.5;
   margin-top: 7px;
 }
-/* the plan, laid on the table */
-.table-plan {
+.wb-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 9px;
-  padding: 8px 2px 2px;
+  padding: 12px 2px 2px;
 }
 
-.side {
+/* chart facts, pinned to the board as they are cited */
+.facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 8px;
+}
+.fact {
   display: flex;
   flex-direction: column;
-  justify-content: space-evenly;
-  z-index: 2;
-  padding: 48px 0;
+  align-items: flex-start;
+  gap: 3px;
+  text-align: left;
+  white-space: normal;
+  background: #fbfaf5;
+  border: 1px solid var(--line-cool);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.45;
 }
-.side.left { align-items: flex-end; margin-right: -30px; }
-.side.right { align-items: flex-start; margin-left: -30px; }
+.fact:hover { border-color: var(--teal); }
+.fact-alias {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--good);
+  background: var(--good-soft);
+  border: 1px solid rgba(30, 111, 66, 0.25);
+  border-radius: 999px;
+  padding: 1px 7px;
+}
+.fact-text { color: var(--ink); }
+.fact-date { font-size: 10.5px; color: var(--muted); }
+
+/* the panel, standing at the board */
+.experts {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 44px;
+}
 
 /* seats: brief-name pills */
 .seat {
@@ -261,12 +276,10 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 
 /* ---------- the foot: your seat, and only what the flow needs ---------- */
 .foot {
-  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  margin-top: -21px;
   padding-bottom: 2px;
 }
 .foot-row { display: flex; align-items: center; gap: 12px; }
@@ -573,8 +586,7 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   .app { height: auto; min-height: 100vh; }
   .main { grid-template-columns: 1fr; }
   .rail { grid-column: 1; grid-row: 2; grid-template-rows: 420px; }
-  .chamber { grid-column: 1; grid-row: 1; }
-  .table-surface { width: min(340px, 60vw); }
+  .chamber { grid-column: 1; grid-row: 1; min-height: 70vh; }
 }
 
 /* your-move banner — the app must never look stuck while waiting on the clinician.

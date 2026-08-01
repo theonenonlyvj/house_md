@@ -17,6 +17,9 @@ export interface CaseConfig {
   presentation: string;
   // The human at the table (Vijay may respecify).
   clinicianSpecialty: string;
+  // Demo panel mode: seat the entire roster (the DEMO_SPEC cast) instead of
+  // deriving seats from case features.
+  seatFullRoster?: boolean;
   // Stedi test-mode scenario key from stedi-poc/scenarios.mjs.
   stediScenario: string;
   payerLabel: string;
@@ -35,6 +38,7 @@ export const DEFAULT_CASE: CaseConfig = {
   presentation:
     'Jane is a 55-year-old woman with progressive exertional dyspnea, bilateral leg edema, preserved ejection fraction, and increased ventricular wall thickness that seems disproportionate to her hypertension. What are we missing?',
   clinicianSpecialty: 'internal-medicine',
+  seatFullRoster: true,
   stediScenario: 'uhc',
   payerLabel: 'UnitedHealthcare (Stedi test mode)',
 };

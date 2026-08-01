@@ -181,7 +181,7 @@ const FUNCTION_DEFS = [
   {
     name: 'get_benefits',
     description:
-      'Run the live insurance eligibility check (Stedi test mode). Returns only facts the payer response contains. Call this after proposing the workup; then have Ms. Okafor (patient services) speak the coverage reality and any re-sequencing.',
+      'Run the live insurance eligibility check (Stedi test mode). Returns only facts the payer response contains. Call this after proposing the workup; then have the ADVOCATE (patient advocate) speak the coverage reality and any re-sequencing.',
     parameters: { type: 'object', properties: {} },
   },
   {
@@ -255,9 +255,8 @@ async function runTool(name: string, args: any): Promise<unknown> {
       ROSTER.find((r) => r.specialty === c.specialty) ||
       ROSTER.find((r) => c.specialty.toLowerCase().includes(r.specialty.split('-')[0]));
     const heard: typeof live.pendingLines = [];
-    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && personaOf(c)?.kind === 'specialist');
-    const skeptic = contributions.find((c) => personaOf(c)?.kind === 'skeptic');
-    for (const c of [firstCited, skeptic]) {
+    const citedSpecialists = contributions.filter((c) => c.interpretation.provenance === 'cited' && personaOf(c)?.kind === 'specialist');
+    for (const c of [citedSpecialists[0], citedSpecialists[1]]) {
       if (!c) continue;
       const p = personaOf(c);
       if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
@@ -355,7 +354,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
           deductibleRemaining: facts.deductibleRemaining,
           outOfPocketRemaining: facts.oopRemaining,
           payerMessages: facts.messages,
-          note: 'Ms. Okafor has ALREADY spoken these facts aloud — do NOT repeat the numbers; just move the discussion forward.',
+          note: 'The ADVOCATE has ALREADY spoken these facts aloud — do NOT repeat the numbers; just move the discussion forward.',
         },
       };
     } catch (e: any) {
@@ -391,7 +390,7 @@ function councilPrompt(): string {
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
       : '',
     'OPENING: The room assembles in silence and LISTENS. The clinician opens the conference aloud — they present their patient, their theory, and their question, ending with a handoff (e.g. "can you take a look?"). Do NOT speak before the clinician has presented. When they hand off, take the floor: run the chart searches, drive the debate, submit the structured output.',
-    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
+    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the strongest dissenting specialist attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then the ADVOCATE (patient advocate) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
@@ -424,7 +423,7 @@ export async function assemble(): Promise<void> {
   const { kickChartIndex } = await import('./moss');
   kickChartIndex(chart);
   const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
-  const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty);
+  const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty, DEFAULT_CASE.seatFullRoster);
   mutate((s) => {
     s.patient = chart.banner;
     s.features = features;
@@ -583,7 +582,7 @@ export function selectHypothesis(id: string): void {
   });
   const s = getState();
   const dx = s.differential.find((d) => d.id === id);
-  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it — include the specialist consultation the standard pathway warrants (e.g. cardiology consult) as one option alongside the tests — then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
+  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it — include the specialist consultation the standard pathway warrants (e.g. specialist consult) as one option alongside the tests — then get_benefits, then the ADVOCATE speaks the coverage reality and any re-sequencing.`);
 }
 
 export function sendMicAudio(buf: Buffer): void {
