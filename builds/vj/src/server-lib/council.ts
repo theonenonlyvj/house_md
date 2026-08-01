@@ -45,7 +45,10 @@ async function speakPendingLines(): Promise<void> {
             signal: AbortSignal.timeout(20000),
           }
         );
-        if (!res.ok) continue;
+        if (!res.ok) {
+          console.error('[council] tts failed', res.status, line.voice, (await res.text()).slice(0, 120));
+          continue;
+        }
         const pcm = Buffer.from(await res.arrayBuffer());
         mutate((s) => { s.transcript.push({ role: 'specialist', personaId: line.personaId, text: `${line.name}: ${line.text}`, at: Date.now() }); });
         // stream in ~200ms slices so playback starts promptly
@@ -230,15 +233,22 @@ async function runTool(name: string, args: any): Promise<unknown> {
 
     // Audible council: queue up to TWO heard lines — first cited specialist + the
     // skeptic — in their own voices (PLAN-FINAL §3). Played after chair audio ends.
+    // The model's personaId strings are loose (id/name/specialty) — resolve fuzzily.
+    const personaOf = (c: SpecialistContribution) =>
+      ROSTER.find((r) => r.id === c.personaId) ||
+      ROSTER.find((r) => r.name === c.personaId) ||
+      ROSTER.find((r) => r.specialty === c.specialty) ||
+      ROSTER.find((r) => c.specialty.toLowerCase().includes(r.specialty.split('-')[0]));
     const heard: typeof live.pendingLines = [];
-    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && ROSTER.find((r) => r.id === c.personaId)?.kind === 'specialist');
-    const skeptic = contributions.find((c) => ROSTER.find((r) => r.id === c.personaId)?.kind === 'skeptic');
+    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && personaOf(c)?.kind === 'specialist');
+    const skeptic = contributions.find((c) => personaOf(c)?.kind === 'skeptic');
     for (const c of [firstCited, skeptic]) {
       if (!c) continue;
-      const p = ROSTER.find((r) => r.id === c.personaId);
+      const p = personaOf(c);
       if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
     }
     live.pendingLines = heard.slice(0, 2);
+    console.log('[council] queued audible lines:', live.pendingLines.length, live.pendingLines.map((l) => l.name));
     // Chair audio may already be done (AgentAudioDone can precede this tool call) —
     // schedule playback; the speaking flag + FIFO keep it overlap-safe.
     setTimeout(() => void speakPendingLines(), 4000);
