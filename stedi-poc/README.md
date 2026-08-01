@@ -12,11 +12,22 @@ pieces.
 
 ```sh
 git pull
-cp .env.example .env       # at repo ROOT — then paste the key values from Vijay
+cp .env.example .env       # at repo ROOT — then fill in STEDI_TEST_API_KEY (see below)
 cd stedi-poc
 node server.mjs            # needs node >= 20 (plain node:http, no npm install)
 # → open http://localhost:4181   (override with PORT=xxxx if taken)
 ```
+
+**Getting the key — either works, only `STEDI_TEST_API_KEY` is needed for this demo:**
+
+- **Fastest: text Vijay** — he'll send his sandbox test key (it's test-mode-only mock
+  data, safe to share within the team; he'll send the other .env values too for the
+  main build).
+- **Or make your own (~5 min, free):** stedi.com → sign up → choose **"Create a
+  healthcare clearinghouse account"** (the sandbox path; work email required) → sidebar
+  → your account name → **API Keys** → **Generate new API Key** → name it with a `test`
+  prefix, type **Test** → paste into `.env`. Sandbox accounts are test-mode-only
+  automatically; test checks are free.
 
 The page auto-runs a first check and has numbered steps + "try next" hints — click
 around. Good tour: `http://localhost:4181/?run=all` runs the whole 34-scenario board.
