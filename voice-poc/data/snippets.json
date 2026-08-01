@@ -1,0 +1,25 @@
+{
+  "note": "Synthetic patient-record snippets for the Retrieve panel. Patient is fictional (Maria Okafor). No real data.",
+  "snippets": [
+    { "id": "s01", "tag": "visit", "text": "2026-03-14 Cardiology clinic note: Maria Okafor, 64F, presents with intermittent chest pain on exertion, resolving with rest. Denies radiation to arm or jaw. Started 3 weeks ago." },
+    { "id": "s02", "tag": "visit", "text": "2026-03-14 Plan: exercise treadmill stress test ordered. Continue metoprolol. Advised to call 911 if chest pain occurs at rest or lasts more than 10 minutes." },
+    { "id": "s03", "tag": "visit", "text": "2025-11-02 ED visit: patient reported palpitations and lightheadedness lasting 20 minutes. ECG showed sinus tachycardia, no ischemic changes. Discharged same day." },
+    { "id": "s04", "tag": "lab", "text": "2026-05-20 Lab result: Hemoglobin A1c 6.8% (down from 7.2% in November 2025). Glycemic control improving on metformin." },
+    { "id": "s05", "tag": "lab", "text": "2025-11-02 Lab result: Hemoglobin A1c 7.2%, fasting glucose 142 mg/dL. Discussed diet changes and metformin dose adjustment." },
+    { "id": "s06", "tag": "lab", "text": "2026-05-20 Lipid panel: LDL 88 mg/dL, HDL 51 mg/dL, triglycerides 160 mg/dL. Continue atorvastatin 40 mg nightly." },
+    { "id": "s07", "tag": "med", "text": "Active medication: metoprolol succinate 25 mg daily for rate control, started January 2026. Tolerating well, no fatigue reported." },
+    { "id": "s08", "tag": "med", "text": "Active medication: metformin 1000 mg twice daily for type 2 diabetes. Active medication: atorvastatin 40 mg nightly for hyperlipidemia." },
+    { "id": "s09", "tag": "allergy", "text": "Allergy list: carvedilol — intolerance (severe fatigue and dizziness, 2024). Penicillin — hives in childhood. No food allergies on record." },
+    { "id": "s10", "tag": "vitals", "text": "2026-05-20 Vitals: BP 128/78, HR 64 regular, BMI 29.1, SpO2 98% on room air. Weight down 4 lbs since last visit." },
+    { "id": "s11", "tag": "imaging", "text": "2026-03-21 Exercise stress echo: 8 minutes on Bruce protocol, no ST changes, normal wall motion at peak stress. Negative for inducible ischemia." },
+    { "id": "s12", "tag": "visit", "text": "2026-06-10 Follow-up: chest pain episodes resolved since March. Patient walking 30 minutes daily. Reports good adherence to metoprolol and metformin." },
+    { "id": "s13", "tag": "history", "text": "Past medical history: type 2 diabetes (2019), hypertension (2017), paroxysmal palpitations (2025). Family history: father had MI at age 58." },
+    { "id": "s14", "tag": "immunization", "text": "Immunizations: influenza vaccine 2025-10-05, COVID-19 booster 2025-10-05, pneumococcal PCV20 2024-08-12. Tdap due 2027." },
+    { "id": "s15", "tag": "procedure", "text": "2025-11-02 Procedure: 12-lead ECG performed in ED. Interpretation: sinus tachycardia at 112 bpm, normal axis, no acute ST-T abnormality." },
+    { "id": "s16", "tag": "reference", "text": "Reference: metoprolol is a cardioselective beta-1 blocker used for hypertension, angina, and rate control. Common side effects include fatigue and bradycardia." },
+    { "id": "s17", "tag": "reference", "text": "Reference: for most nonpregnant adults with type 2 diabetes, an A1c target below 7% is reasonable; less stringent targets suit limited life expectancy." },
+    { "id": "s18", "tag": "reference", "text": "Reference: exertional chest pain relieved by rest is the classic pattern of stable angina; pain at rest or lasting over 10 minutes warrants emergency evaluation." },
+    { "id": "s19", "tag": "reference", "text": "Reference: patients intolerant of one beta blocker (e.g. carvedilol) may still tolerate a cardioselective agent such as metoprolol at low dose." },
+    { "id": "s20", "tag": "care-plan", "text": "Care plan: recheck A1c and lipids in 6 months (due November 2026). Cardiology follow-up in 12 months unless chest pain recurs." }
+  ]
+}

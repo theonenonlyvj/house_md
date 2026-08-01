@@ -274,3 +274,18 @@ At **Voice Agent Standard ($0.075/min)**, $200 credit ≈ **2,666 minutes ≈ ~4
 - **Event race conditions**: wait for `SettingsApplied` before assuming the agent is configured/ready; don't start streaming mic audio purely on `Welcome`.
 - **Type-name confusion**: don't copy the `AgentV1*`-prefixed names straight from the API Reference page into your `if (data.type === ...)` checks — those are reference-doc schema labels; the wire value is the short form (`"ConversationText"`, not `"AgentV1ConversationText"`). Confirmed via the dedicated inputs/outputs and function-call doc pages, which all show short-form JSON examples.
 - **Function-call args are a string**: `FunctionCallRequest.functions[].arguments` is JSON-*encoded as a string* — `JSON.parse()` it before use. Same for your `FunctionCallResponse.content` — stringify your result object.
+
+---
+
+## ADDENDUM (2026-08-01 12:15, from the voice-poc live build — verified on the wire)
+
+- `InjectUserMessage` schema confirmed live: `{ "type": "InjectUserMessage", "content": "..." }`.
+- The agent WS also emits **`History`** events (absent from the event list above) and
+  echoes a `FunctionCallResponse`-typed message back after you send yours — both safe to ignore.
+- `LatencyReport` arrives ~2× per turn.
+- Function calling with `open_ai`/`gpt-4o-mini` + `agent.think.functions` works exactly as §4
+  describes (client-side handling, stringified args both directions).
+- Known-good full `Settings` payload: see `voice-poc/server.mjs` → `buildSettings()`
+  (nova-3 + gpt-4o-mini + Aura-2, linear16@24k both directions, functions, greeting).
+- Browser relay pattern that works: server-side WS to Deepgram, browser↔server relay;
+  wait for `SettingsApplied` before forwarding mic audio; AudioWorklet → linear16@24k.
