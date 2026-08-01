@@ -395,8 +395,40 @@ export default function Page() {
   const floorTurn = lastTurn && lastTurn.role !== 'clinician' && Date.now() - lastTurn.at < 8000 ? lastTurn : null;
 
   const chairShort = chairSeat ? shortLabel(chairSeat) : 'CHAIR';
+
+  // Strip follows the ACTUAL seating decision (a case swap reseats the room);
+  // before convene it previews the full roster cast. Avatars by specialty with
+  // distinct-face reuse where no dedicated photo exists.
+  const AVATAR: Record<string, string> = {
+    'internal-medicine': '/avatars/house.png',
+    pulmonology: '/avatars/cardiology.png',
+    gastroenterology: '/avatars/nephrology.png',
+    'infectious-disease': '/avatars/endocrinology.png',
+    cardiology: '/avatars/cardiology.png',
+    nephrology: '/avatars/nephrology.png',
+    neurology: '/avatars/neurology.png',
+    endocrinology: '/avatars/endocrinology.png',
+    hematology: '/avatars/hematology.png',
+    'diagnostic-skeptic': '/avatars/skeptic.png',
+    'clinical-pharmacology': '/avatars/clin-pharm.png',
+    reimbursement: '/avatars/reimbursement.png',
+    'patient-advocacy': '/avatars/reimbursement.png',
+  };
+  const stripSlots: typeof PANEL_STRIP =
+    seats.length > 0
+      ? seats
+          .filter((st) => st.status !== 'human')
+          .map((st) => ({
+            label: st.status === 'empty' ? `${shortLabel(st)} · EMPTY` : shortLabel(st),
+            avatar: AVATAR[st.specialty] || '/avatars/house.png',
+            personaIds: st.personaId ? [st.personaId] : [],
+            specialties: [st.specialty],
+            role: seatRole(st),
+          }))
+      : PANEL_STRIP;
+
   const shortById: Record<string, string> = {};
-  for (const slot of PANEL_STRIP) {
+  for (const slot of stripSlots) {
     for (const id of slot.personaIds) shortById[id] = slot.label;
   }
   for (const seat of seats) if (seat.personaId) shortById[seat.personaId] = shortLabel(seat);
@@ -439,7 +471,7 @@ export default function Page() {
       <div className="main">
         <section className="chamber">
           <div className="experts">
-            {PANEL_STRIP.map((slot) => (
+            {stripSlots.map((slot) => (
               <PanelSeat
                 key={slot.label}
                 slot={slot}
