@@ -21,10 +21,18 @@ describe('seating (Guardrail #1)', () => {
     expect(req).toContain('neurology');
   });
 
-  it('renders hematology as a real EMPTY seat with the default roster', () => {
+  it('seats hematology with the full default roster (nothing empty for the demo case)', () => {
     const d = decideSeating(janeFeatures, ROSTER, 'internal-medicine');
+    expect(emptySeats(d).length).toBe(0);
+    const heme = d.seats.find((s) => s.specialty === 'hematology');
+    expect(heme?.status).toBe('seated');
+  });
+
+  it('EMPTY-seat mechanism still fires when the roster genuinely lacks a required specialty', () => {
+    const truncated = ROSTER.filter((p) => p.specialty !== 'neurology');
+    const d = decideSeating(janeFeatures, truncated, 'internal-medicine');
     const empty = emptySeats(d);
-    expect(empty.map((s) => s.specialty)).toContain('hematology');
+    expect(empty.map((s) => s.specialty)).toContain('neurology');
     expect(empty.every((s) => s.reasons.length > 0)).toBe(true);
   });
 

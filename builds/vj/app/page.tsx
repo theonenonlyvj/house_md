@@ -14,12 +14,19 @@ const post = (url: string, body?: unknown) =>
 
 function useSession(): S | null {
   const [s, setS] = useState<S | null>(null);
+  const lastVersion = useRef(-1);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
         const r = await fetch('/api/session', { cache: 'no-store' });
-        if (alive) setS(await r.json());
+        const next: S = await r.json();
+        // Only re-render when server state actually changed — polling without this
+        // repaints the whole table every 700ms and feels randomly laggy.
+        if (alive && next.version !== lastVersion.current) {
+          lastVersion.current = next.version;
+          setS(next);
+        }
       } catch {}
     };
     tick();
@@ -31,8 +38,14 @@ function useSession(): S | null {
 
 // Panel speech: pull the PCM stream and play through Web Audio. An analyser taps
 // the same graph and publishes live loudness as --audio-level, so the speaking
-// seat's ring pulses with the actual voice.
-function useChairAudio(enabled: boolean) {
+// seat's ring pulses with the actual voice. `interrupted` flips when the session
+// hears the clinician — we hard-flush the scheduled buffer so the chair actually
+// shuts up when interrupted instead of playing out its backlog.
+function useChairAudio(enabled: boolean, interrupted: boolean) {
+  const flushRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (interrupted) flushRef.current();
+  }, [interrupted]);
   useEffect(() => {
     if (!enabled) return;
     const ctx = new AudioContext({ sampleRate: 24000 });
@@ -50,8 +63,14 @@ function useChairAudio(enabled: boolean) {
       raf = requestAnimationFrame(meter);
     };
     raf = requestAnimationFrame(meter);
+    const scheduled = new Set<AudioBufferSourceNode>();
     let nextAt = 0;
     let stop = false;
+    flushRef.current = () => {
+      for (const src of scheduled) { try { src.stop(); } catch {} }
+      scheduled.clear();
+      nextAt = 0;
+    };
     (async () => {
       try {
         const res = await fetch('/api/audio');
@@ -73,7 +92,9 @@ function useChairAudio(enabled: boolean) {
           const src = ctx.createBufferSource();
           src.buffer = ab;
           src.connect(analyser);
-          nextAt = Math.max(nextAt, ctx.currentTime + 0.05);
+          src.onended = () => scheduled.delete(src);
+          scheduled.add(src);
+          nextAt = Math.max(nextAt, ctx.currentTime + 0.15);
           src.start(nextAt);
           nextAt += ab.duration;
         }
@@ -83,18 +104,26 @@ function useChairAudio(enabled: boolean) {
       stop = true;
       cancelAnimationFrame(raf);
       document.documentElement.style.setProperty('--audio-level', '0');
+      flushRef.current();
       ctx.close();
     };
   }, [enabled]);
 }
 
-// Push-to-talk: hold → mic PCM (24k linear16 via worklet) → /ws/voice → the live
-// panel session's listen leg (nova-3). Release to stop. You are at the table.
-function usePushToTalk() {
-  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream }>({});
-  const [talking, setTalking] = useState(false);
-  const start = useCallback(async () => {
-    if (ref.current.ws) return;
+// Always-on mic with instant mute/unmute. Setup (permission + WS + worklet) happens
+// ONCE on first enable; after that the toggle just gates frames — zero latency, no
+// lost first words. While unmuted, audio streams continuously to the session's
+// nova-3 listen leg; its VAD handles turns and barge-in.
+function useMic() {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean; muted: boolean }>({ live: false, muted: true });
+  const [state, setState] = useState<'off' | 'muted' | 'live'>('off');
+  const toggle = useCallback(async () => {
+    const r = ref.current;
+    if (r.live) {
+      r.muted = !r.muted;
+      setState(r.muted ? 'muted' : 'live');
+      return;
+    }
     try {
       const ws = new WebSocket(`ws://${location.host}/ws/voice`);
       await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
@@ -102,26 +131,27 @@ function usePushToTalk() {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
       const ctx = new AudioContext({ sampleRate: 24000 });
+      await ctx.resume(); // autoplay policy can leave it suspended → silent capture
       await ctx.audioWorklet.addModule('/pcm-worklet.js');
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'pcm-capture');
-      node.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+      node.port.onmessage = (e) => {
+        const cur = ref.current;
+        if (!cur.ws || cur.ws.readyState !== 1) return;
+        // CONTINUOUS stream: mute sends zero-frames instead of stopping — Deepgram's
+        // turn detection breaks on stalled streams (>10s transcript delays), and
+        // resuming mid-stream eats the first words. Unmute = pure flag flip.
+        cur.ws.send(cur.muted ? new ArrayBuffer((e.data as ArrayBuffer).byteLength) : e.data);
+      };
       src.connect(node);
-      ref.current = { ws, ctx, stream };
-      setTalking(true);
+      ws.onclose = () => { ref.current.live = false; ref.current.muted = true; setState('off'); };
+      ref.current = { ws, ctx, stream, live: true, muted: false };
+      setState('live');
     } catch {
-      setTalking(false);
+      setState('off');
     }
   }, []);
-  const stop = useCallback(() => {
-    const { ws, ctx, stream } = ref.current;
-    stream?.getTracks().forEach((t) => t.stop());
-    void ctx?.close();
-    setTimeout(() => ws?.close(), 400);
-    ref.current = {};
-    setTalking(false);
-  }, []);
-  return { talking, start, stop };
+  return { state, toggle };
 }
 
 // ---- Presentation helpers (no logic). Seat roles and labels read seat DATA, never
@@ -185,8 +215,8 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  useChairAudio(audioOn);
-  const ptt = usePushToTalk();
+  const mic = useMic();
+  useChairAudio(audioOn, s?.activity === 'hearing you…');
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -225,10 +255,21 @@ export default function Page() {
   const leftSeats = sideSeats.slice(0, half);
   const rightSeats = sideSeats.slice(half);
   const canConvene = s.phase === 'case-ready' || s.phase === 'recoverable-error';
-  const canFinalize = s.phase === 'benefits-ready' || s.phase === 'workup-ready';
+  // Finalize is gated on the clinical flow: leading dx selected AND a proposed
+  // workup with selected options AND the session in a plan-ready phase.
+  const canFinalize =
+    (s.phase === 'benefits-ready' || s.phase === 'workup-ready') &&
+    !!s.selectedHypothesisId &&
+    s.workup.some((o) => o.selected);
   const leading = s.differential.find((d) => d.status === 'leading');
   const allCreated = [...created, ...s.createdResources];
   const status = s.activity || PHASE_STATUS[s.phase] || '';
+  const yourMove =
+    s.phase === 'differential-ready' && !s.selectedHypothesisId
+      ? 'The panel rests — your call, doctor: set the leading direction below.'
+      : s.phase === 'workup-ready' || s.phase === 'benefits-ready'
+        ? 'Your move: review the plan and coverage, then write it to the chart.'
+        : null;
 
   // Who has the floor: the seat behind the most recent non-clinician turn, if fresh.
   // Turns carrying internal tool names are orchestration echoes, not speech — hide them.
@@ -320,16 +361,19 @@ export default function Page() {
               </button>
             ) : (
               <div className="foot-row">
-                <button
-                  className={`ptt${ptt.talking ? ' talking' : ''}`}
-                  onPointerDown={ptt.start}
-                  onPointerUp={ptt.stop}
-                  onPointerLeave={ptt.stop}
-                >
+                <button className={`ptt${mic.state === 'live' ? ' talking' : ''}`} onClick={mic.toggle}>
                   <span className="avatar">YOU</span>
                   <span className="ptt-text">
-                    <span className="ptt-label">{ptt.talking ? 'Listening — release when done' : 'Hold to speak'}</span>
-                    <span className="ptt-sub">your seat, at the foot of the table</span>
+                    <span className="ptt-label">
+                      {mic.state === 'live' ? 'Mic live — click to mute' : mic.state === 'muted' ? 'Mic muted — click to speak' : 'Enable your mic'}
+                    </span>
+                    <span className="ptt-sub">
+                      {mic.state === 'live'
+                        ? 'the panel hears you — speak to interrupt'
+                        : mic.state === 'muted'
+                          ? 'your seat, at the foot of the table'
+                          : 'one-time setup, then instant mute/unmute'}
+                    </span>
                   </span>
                 </button>
                 {canFinalize && (
@@ -369,6 +413,8 @@ export default function Page() {
           <section className="panel">
             <div className="panel-title">Next steps</div>
             <div className="panel-body">
+              {yourMove && <div className="yourmove">{yourMove}</div>}
+
               {leading && s.workup.length > 0 && (
                 <div className="leadline">
                   <span className="leadline-label">Leading</span> {leading.display}

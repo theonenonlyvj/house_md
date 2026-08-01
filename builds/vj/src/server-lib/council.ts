@@ -205,11 +205,22 @@ async function runTool(name: string, args: any): Promise<unknown> {
     const q = String(args.query || '');
     mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${q.slice(0, 80)}"`; });
     const { mossSearch } = await import('./moss');
-    const mossHits = await mossSearch(chart, q);
-    const hits = mossHits ?? searchEvidence(chart, q);
+    const mossHits = await mossSearch(chart, q, 10);
+    const hits = mossHits ?? searchEvidence(chart, q, 10);
     const source = mossHits ? 'Moss semantic search' : 'chart keyword search';
     mutate((s) => { s.activity = `${source}: ${hits.length} of ${chart.aliases.length} records for "${q.slice(0, 50)}"`; });
-    return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
+    // Chronological sweep: longitudinal charts hide old clues search queries never
+    // reach. Always include the oldest records the search DIDN'T return, labeled.
+    const hitAliases = new Set(hits.map((h) => h.alias));
+    const olderHistory = chart.aliases
+      .filter((a) => a.date && !hitAliases.has(a.alias))
+      .sort((a, b) => (a.date! < b.date! ? -1 : 1))
+      .slice(0, 4);
+    return {
+      evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, date: h.date, fact: h.fact })),
+      oldest_history_not_in_results: olderHistory.map((h) => ({ alias: h.alias, resourceType: h.resourceType, date: h.date, fact: h.fact })),
+      note: 'oldest_history_not_in_results = the deep archive your query missed — old clues often matter; cite by alias like any evidence.',
+    };
   }
 
   if (name === 'submit_council_output') {
@@ -320,6 +331,23 @@ async function runTool(name: string, args: any): Promise<unknown> {
         s.phase = 'benefits-ready';
         s.activity = undefined;
       });
+      // The reimbursement seat speaks the facts herself — composed ONLY from the
+      // returned response, in her own voice, queued behind current speech.
+      const okafor = ROSTER.find((r) => r.kind === 'reimbursement');
+      if (okafor?.voice) {
+        const referralMsg = facts.messages.find((m) => /referral/i.test(m));
+        const line = [
+          'Coverage check is back.',
+          facts.planActive ? 'The plan is active.' : 'The plan shows inactive.',
+          facts.copay ? `Specialist visits carry a ${facts.copay.replace('$', '')} dollar copay.` : '',
+          facts.deductibleRemaining === '$0' ? 'The deductible is already met.' : '',
+          facts.oopRemaining ? `${facts.oopRemaining.replace('$', '')} dollars left on the out-of-pocket max.` : '',
+          referralMsg ? 'One gate: the payer requires a P C P referral before the specialist visit — I have re-sequenced the consult behind it. Labs proceed now.' : '',
+          'Payer-reported figures, not guarantees.',
+        ].filter(Boolean).join(' ');
+        live.pendingLines.push({ name: okafor.name, voice: okafor.voice, text: line, personaId: okafor.id });
+        setTimeout(() => void speakPendingLines(), 3000);
+      }
       return {
         facts: {
           planActive: facts.planActive,
@@ -327,7 +355,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
           deductibleRemaining: facts.deductibleRemaining,
           outOfPocketRemaining: facts.oopRemaining,
           payerMessages: facts.messages,
-          note: 'Speak ONLY these facts. Labs have no service-specific rows — say so. The consult re-sequences behind the referral.',
+          note: 'Ms. Okafor has ALREADY spoken these facts aloud — do NOT repeat the numbers; just move the discussion forward.',
         },
       };
     } catch (e: any) {
@@ -357,12 +385,12 @@ function councilPrompt(): string {
     .filter(Boolean)
     .join('\n');
   return [
-    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). You may quote at most two short specialist lines aloud, attributed by name.',
+    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). NEVER prefix your speech with any speaker label of any kind. BAD: "House: Good." BAD: "SPEAKING AS CHAIR (House, M.D.): Good." BAD: "Chair — Good." GOOD: "Good." You ARE the voice; just talk. You may quote at most two short specialist lines aloud, attributed by name mid-sentence.',
     `SEATED COUNCIL (role-play each in structured output):\n${personas}`,
     empty.length
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
       : '',
-    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence; cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) Keep spoken output short; the table shows the detail.',
+    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
@@ -372,9 +400,8 @@ function councilPrompt(): string {
 function buildSettings(thinkModel: string) {
   const think: any = { provider: { type: 'open_ai', model: thinkModel }, prompt: councilPrompt().slice(0, 24000), functions: FUNCTION_DEFS };
   // NOTE: no temperature — gpt-5-mini hard-rejects non-default values (verified live today).
-  const s = getState();
-  const empty = s.seating ? emptySeats(s.seating) : [];
-  const greeting = `Council assembled for ${s.patient?.name}. ${empty.length ? `Note for the record: this case warrants ${empty.map((e) => e.specialty).join(' and ')} — ${empty.length > 1 ? 'those seats are' : 'that seat is'} empty. We flag gaps, we don't fake them. ` : ''}Doctor, present your case.`;
+  // No greeting: the room assembles in silence while analysis runs — the first thing
+  // the clinician HEARS is the chair opening the actual conference (Vijay, 3:24pm).
   return {
     type: 'Settings',
     audio: { input: { encoding: 'linear16', sample_rate: 24000 }, output: { encoding: 'linear16', sample_rate: 24000, container: 'none' } },
@@ -383,15 +410,16 @@ function buildSettings(thinkModel: string) {
       listen: { provider: { type: 'deepgram', model: 'nova-3' } },
       think,
       speak: { provider: { type: 'deepgram', model: 'aura-2-apollo-en' } },
-      greeting: greeting.slice(0, 295),
     },
   };
 }
 
 // ---- session lifecycle ----
 export async function assemble(presentation: string): Promise<void> {
+  mutate((s) => { s.phase = 'reasoning'; s.activity = 'loading the chart from Medplum…'; });
   const chart = await loadChart();
   live.chart = chart;
+  mutate((s) => { s.activity = `chart loaded — ${chart.aliases.length} records; deriving case features…`; });
   const { kickChartIndex } = await import('./moss');
   kickChartIndex(chart);
   const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
@@ -401,14 +429,16 @@ export async function assemble(presentation: string): Promise<void> {
     s.features = features;
     s.seating = seating;
     s.phase = 'reasoning';
-    s.activity = chart.source === 'dev-local' ? 'DEV CHART (Medplum patient pending — plug Noah’s seed into case config)' : undefined;
+    s.activity = 'the council is convening — deliberation begins shortly…';
     s.transcript.push({ role: 'clinician', text: presentation, at: Date.now() });
   });
 
   await openAgent(presentation);
 }
 
-async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-5-mini', isRetry = false): Promise<void> {
+// gpt-4o-mini: ~0.4s to first token vs gpt-5-mini's 7-15s — conversational feel wins
+// (Vijay, 3:44pm). Structure/guardrails are code-enforced regardless of model depth.
+async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-4o-mini', isRetry = false): Promise<void> {
   closeAgent();
   const dgKey = key('DEEPGRAM_API_KEY');
   if (!dgKey) {
@@ -454,12 +484,16 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       return;
     }
     if (msg.type === 'ConversationText') {
-      const text = String(msg.content || '');
+      const text = String(msg.content || '').replace(/^\s*(?:speaking as\s+)?(?:the\s+)?(?:chair|house(?:,?\s*m\.?d\.?)?)(?:\s*\([^)]{0,40}\))?\s*[:—-]+\s*/i, '');
       // Guard: models occasionally echo prompt fragments as assistant turns — keep
       // the spoken transcript short, human lines only.
-      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
+      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style|^\s*[-•(]|^\s*(Interpretation|Contradiction|Discriminator|Evidence)\b/i.test(text))) return;
+      // Hide stage-direction injects (our composed instructions) from the visible dialog.
+      if (msg.role !== 'assistant' && /submit_council_output|propose_workup|get_benefits|convene the council/i.test(text)) return;
       mutate((s) => {
         const role = msg.role === 'assistant' ? 'chair' : 'clinician';
+        const last = s.transcript[s.transcript.length - 1];
+        if (last && last.role === role && last.text === text) return; // dedupe repeats
         s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text, at: Date.now() });
       });
       return;
@@ -475,21 +509,34 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       }
       return;
     }
+    if (msg.type === 'AgentThinking') {
+      mutate((s) => { s.activity = 'the chair is thinking…'; });
+      return;
+    }
+    if (msg.type === 'UserStartedSpeaking') {
+      mutate((s) => { s.activity = 'hearing you…'; });
+      return;
+    }
+    if (msg.type === 'AgentStartedSpeaking') {
+      mutate((s) => { s.activity = 'the chair is speaking'; });
+      return;
+    }
     if (msg.type === 'AgentAudioDone') {
+      mutate((s) => { s.activity = undefined; });
       void speakPendingLines();
       return;
     }
     if (msg.type === 'Warning') {
       // SLOW_THINK_REQUEST is routine for gpt-5-mini — surface as activity, not error.
-      mutate((s) => { s.activity = `model thinking… (${msg.code || 'warning'})`; });
+      mutate((s) => { s.activity = 'the council is thinking — deep reasoning takes a few seconds…'; });
       if (String(msg.code || msg.description || '').includes('THINK_REQUEST_FAILED') && !isRetry) {
-        openAgent(presentation, 'gpt-4o-mini', true);
+        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       }
       return;
     }
     if (msg.type === 'Error') {
       if (!isRetry) {
-        openAgent(presentation, 'gpt-4o-mini', true);
+        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       } else {
         mutate((s) => { s.phase = 'recoverable-error'; s.error = `Agent error: ${String(msg.description || msg.message || 'unknown').slice(0, 200)} — retry available`; });
       }
@@ -498,6 +545,19 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
 
   ws.on('error', (e: any) => {
     if (ws === live.ws) mutate((s) => { s.phase = 'recoverable-error'; s.error = `Voice session error: ${String(e.message || e).slice(0, 150)} — retry available`; });
+  });
+
+  ws.on('close', () => {
+    // An unexpected drop must never look like a hang — announce it with a retry.
+    if (ws === live.ws && live.ready) {
+      live.ready = false;
+      mutate((s) => {
+        if (s.phase !== 'complete' && s.phase !== 'recoverable-error') {
+          s.phase = 'recoverable-error';
+          s.error = 'Voice session closed unexpectedly — retry re-assembles the council (board state is kept)';
+        }
+      });
+    }
   });
 }
 
