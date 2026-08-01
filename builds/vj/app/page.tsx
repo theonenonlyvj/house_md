@@ -265,11 +265,15 @@ export default function Page() {
   const allCreated = [...created, ...s.createdResources];
   const status = s.activity || PHASE_STATUS[s.phase] || '';
   const yourMove =
-    s.phase === 'differential-ready' && !s.selectedHypothesisId
-      ? 'The panel rests — your call, doctor: set the leading direction below.'
-      : s.phase === 'workup-ready' || s.phase === 'benefits-ready'
-        ? 'Your move: review the plan and coverage, then write it to the chart.'
-        : null;
+    s.phase === 'listening'
+      ? mic.state === 'off'
+        ? 'The panel is seated and listening — enable your mic and present your case.'
+        : 'The panel is listening — present your case and ask your question.'
+      : s.phase === 'differential-ready' && !s.selectedHypothesisId
+        ? 'The panel rests — your call, doctor: set the leading direction below.'
+        : s.phase === 'workup-ready' || s.phase === 'benefits-ready'
+          ? 'Your move: review the plan and coverage, then write it to the chart.'
+          : null;
 
   // Who has the floor: the seat behind the most recent non-clinician turn, if fresh.
   // Turns carrying internal tool names are orchestration echoes, not speech — hide them.
@@ -312,13 +316,8 @@ export default function Page() {
     <div className="app">
       <header className="masthead">
         <span className="name">house_md</span>
-        {s.patient && <span className="patient">{s.patient.name}</span>}
-        <span className="badge syn" title="Synthetic patient — decision support, not diagnosis: the panel argues, the clinician decides.">
-          Synthetic · decision support, not diagnosis
-        </span>
         <span className="spacer" />
         {status && <span className="activity">{status}</span>}
-        <button className="ghost" onClick={() => setAudioOn((v) => !v)}>{audioOn ? 'Mute' : 'Unmute'}</button>
         <button className="ghost" onClick={() => { post('/api/session/reset'); setFinalized(null); setCreated([]); }}>
           Reset
         </button>
@@ -339,11 +338,77 @@ export default function Page() {
 
             <div className="table-surface">
               {s.patient && (
-                <div className="case-card">
+                <div className="table-head">
                   <div className="case-name">{s.patient.name}</div>
-                  {s.features?.chiefComplaint && <div className="case-cc">{s.features.chiefComplaint}</div>}
+                  <div className="case-meta">
+                    {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
+                  </div>
+                  {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
                 </div>
               )}
+
+              <div className="table-plan">
+                {yourMove && <div className="yourmove">{yourMove}</div>}
+
+                {leading && s.workup.length > 0 && (
+                  <div className="leadline">
+                    <span className="leadline-label">Leading</span> {leading.display}
+                  </div>
+                )}
+
+                {s.workup.length === 0 && s.differential.length > 0 && (
+                  <>
+                    <div className="steps-label">The panel’s differential — set the direction</div>
+                    {s.differential.map((d) => (
+                      <button
+                        key={d.id}
+                        className={`dxrow${d.status === 'leading' ? ' leading' : ''}`}
+                        disabled={d.status === 'leading'}
+                        onClick={() => post('/api/session/select', { id: d.id })}
+                      >
+                        <span className="rank">{d.rank}</span>
+                        <span className="dx-name">{d.display}</span>
+                      </button>
+                    ))}
+                  </>
+                )}
+
+                {s.workup.map((o) => (
+                  <div key={o.id} className="opt">
+                    <div className="opt-head">
+                      <span className="title">{o.display}</span>
+                      <span className={`prio ${o.priority}`}>{o.priority}</span>
+                    </div>
+                    <div className="purpose">{o.purpose}</div>
+                    {o.sequenceNote && <div className="seq">{o.sequenceNote}</div>}
+                    {o.benefit && (
+                      <div className="cov" title={o.benefit.messages.join(' · ') || undefined}>
+                        {o.benefit.matched
+                          ? [
+                              `plan ${o.benefit.planActive ? 'active' : 'inactive'}`,
+                              o.benefit.copay && `copay ${o.benefit.copay}`,
+                              o.benefit.deductibleRemaining && `deductible left ${o.benefit.deductibleRemaining}`,
+                            ].filter(Boolean).join(' · ')
+                          : 'no benefit information returned'}
+                      </div>
+                    )}
+                  </div>
+                ))}
+
+                {allCreated.length > 0 && (
+                  <>
+                    <div className="steps-label">Written to the chart</div>
+                    <div>
+                      {allCreated.map((r) => (
+                        <span key={r.id} className="chip" onClick={() => openCite(r.resourceType, r.id)}>
+                          {r.resourceType}/{r.id.slice(0, 8)}…
+                        </span>
+                      ))}
+                    </div>
+                  </>
+                )}
+                {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
+              </div>
             </div>
 
             <div className="side right">
@@ -410,75 +475,6 @@ export default function Page() {
             </div>
           </section>
 
-          <section className="panel">
-            <div className="panel-title">Next steps</div>
-            <div className="panel-body">
-              {yourMove && <div className="yourmove">{yourMove}</div>}
-
-              {leading && s.workup.length > 0 && (
-                <div className="leadline">
-                  <span className="leadline-label">Leading</span> {leading.display}
-                </div>
-              )}
-
-              {s.workup.length === 0 && s.differential.length > 0 && (
-                <>
-                  <div className="steps-label">The panel’s differential — set the direction</div>
-                  {s.differential.map((d) => (
-                    <button
-                      key={d.id}
-                      className={`dxrow${d.status === 'leading' ? ' leading' : ''}`}
-                      disabled={d.status === 'leading'}
-                      onClick={() => post('/api/session/select', { id: d.id })}
-                    >
-                      <span className="rank">{d.rank}</span>
-                      <span className="dx-name">{d.display}</span>
-                    </button>
-                  ))}
-                </>
-              )}
-
-              {s.workup.map((o) => (
-                <div key={o.id} className="opt">
-                  <div className="opt-head">
-                    <span className="title">{o.display}</span>
-                    <span className={`prio ${o.priority}`}>{o.priority}</span>
-                  </div>
-                  <div className="purpose">{o.purpose}</div>
-                  {o.sequenceNote && <div className="seq">{o.sequenceNote}</div>}
-                  {o.benefit && (
-                    <div className="cov" title={o.benefit.messages.join(' · ') || undefined}>
-                      {o.benefit.matched
-                        ? [
-                            `plan ${o.benefit.planActive ? 'active' : 'inactive'}`,
-                            o.benefit.copay && `copay ${o.benefit.copay}`,
-                            o.benefit.deductibleRemaining && `deductible left ${o.benefit.deductibleRemaining}`,
-                          ].filter(Boolean).join(' · ')
-                        : 'no benefit information returned'}
-                    </div>
-                  )}
-                </div>
-              ))}
-
-              {allCreated.length > 0 && (
-                <>
-                  <div className="steps-label">Written to the chart</div>
-                  <div>
-                    {allCreated.map((r) => (
-                      <span key={r.id} className="chip" onClick={() => openCite(r.resourceType, r.id)}>
-                        {r.resourceType}/{r.id.slice(0, 8)}…
-                      </span>
-                    ))}
-                  </div>
-                </>
-              )}
-              {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
-
-              {s.differential.length === 0 && s.workup.length === 0 && allCreated.length === 0 && (
-                <div className="placeholder">The panel’s plan lands here.</div>
-              )}
-            </div>
-          </section>
         </aside>
       </div>
 

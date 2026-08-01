@@ -390,6 +390,7 @@ function councilPrompt(): string {
     empty.length
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
       : '',
+    'OPENING: The room assembles in silence and LISTENS. The clinician opens the conference aloud — they present their patient, their theory, and their question, ending with a handoff (e.g. "can you take a look?"). Do NOT speak before the clinician has presented. When they hand off, take the floor: run the chart searches, drive the debate, submit the structured output.',
     'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
@@ -415,7 +416,7 @@ function buildSettings(thinkModel: string) {
 }
 
 // ---- session lifecycle ----
-export async function assemble(presentation: string): Promise<void> {
+export async function assemble(): Promise<void> {
   mutate((s) => { s.phase = 'reasoning'; s.activity = 'loading the chart from Medplum…'; });
   const chart = await loadChart();
   live.chart = chart;
@@ -429,16 +430,15 @@ export async function assemble(presentation: string): Promise<void> {
     s.features = features;
     s.seating = seating;
     s.phase = 'reasoning';
-    s.activity = 'the council is convening — deliberation begins shortly…';
-    s.transcript.push({ role: 'clinician', text: presentation, at: Date.now() });
+    s.activity = 'the panel is convening…';
   });
 
-  await openAgent(presentation);
+  await openAgent();
 }
 
 // gpt-4o-mini: ~0.4s to first token vs gpt-5-mini's 7-15s — conversational feel wins
 // (Vijay, 3:44pm). Structure/guardrails are code-enforced regardless of model depth.
-async function openAgent(presentation: string, thinkModel = process.env.THINK_MODEL || 'gpt-4o-mini', isRetry = false): Promise<void> {
+async function openAgent(thinkModel = process.env.THINK_MODEL || 'gpt-4o-mini', isRetry = false): Promise<void> {
   closeAgent();
   const dgKey = key('DEEPGRAM_API_KEY');
   if (!dgKey) {
@@ -477,10 +477,10 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
           ws.send(JSON.stringify({ type: 'KeepAlive' }));
         }
       }, 5000);
-      // Drive the debate: inject the presentation as the clinician's opening.
-      setTimeout(() => {
-        inject(`${presentation}\n\nChair: convene the council. Have each seated specialist argue their read (search the chart first), then submit via submit_council_output.`);
-      }, 1200);
+      // The room is seated and LISTENS. No canned presentation is injected
+      // (AGENTS.md: never inject a stored transcript) — the clinician's actual
+      // voice through the mic opens the conference and drives the debate.
+      mutate((s) => { s.phase = 'listening'; s.activity = 'the panel is seated and listening — present your case'; });
       return;
     }
     if (msg.type === 'ConversationText') {
@@ -495,6 +495,7 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
         const last = s.transcript[s.transcript.length - 1];
         if (last && last.role === role && last.text === text) return; // dedupe repeats
         s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text, at: Date.now() });
+        if (role === 'clinician' && s.phase === 'listening') s.phase = 'reasoning';
       });
       return;
     }
@@ -530,13 +531,13 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       // SLOW_THINK_REQUEST is routine for gpt-5-mini — surface as activity, not error.
       mutate((s) => { s.activity = 'the council is thinking — deep reasoning takes a few seconds…'; });
       if (String(msg.code || msg.description || '').includes('THINK_REQUEST_FAILED') && !isRetry) {
-        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
+        openAgent(thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       }
       return;
     }
     if (msg.type === 'Error') {
       if (!isRetry) {
-        openAgent(presentation, thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
+        openAgent(thinkModel === 'gpt-4o-mini' ? 'gpt-5-mini' : 'gpt-4o-mini', true);
       } else {
         mutate((s) => { s.phase = 'recoverable-error'; s.error = `Agent error: ${String(msg.description || msg.message || 'unknown').slice(0, 200)} — retry available`; });
       }

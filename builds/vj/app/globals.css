@@ -91,13 +91,16 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 440px;
+  /* The room LEFT (plan on the table), transcript RIGHT. */
+  grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
   gap: 16px;
   padding: 14px 18px 16px;
-  max-width: 1600px;
+  max-width: 1500px;
   width: 100%;
   margin: 0 auto;
 }
+.chamber { grid-column: 1; grid-row: 1; }
+.rail { grid-column: 2; grid-row: 1; }
 
 /* ---------- masthead ---------- */
 .masthead {
@@ -166,8 +169,8 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   align-items: stretch;
 }
 .table-surface {
-  width: min(420px, 36vw);
-  border-radius: 34px;
+  width: min(420px, 34vw);
+  border-radius: 30px;
   background: linear-gradient(180deg, var(--table-1) 0%, var(--table-2) 55%, var(--table-3) 100%);
   border: 1px solid var(--line);
   box-shadow:
@@ -175,24 +178,46 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
     inset 0 0 0 8px rgba(150, 130, 80, 0.18),
     var(--shadow-soft);
   display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 40px 28px;
+  flex-direction: column;
+  min-height: 0;
+  padding: 30px 22px 16px;
 }
-.case-card { text-align: center; max-width: 300px; }
+/* the patient context, at the head of the table */
+.table-head {
+  text-align: center;
+  padding-bottom: 12px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid rgba(150, 130, 80, 0.22);
+}
 .case-name {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: 19px;
+  font-size: 18px;
   letter-spacing: 0.01em;
+}
+.case-meta {
+  font-size: 11.5px;
+  color: var(--muted);
+  letter-spacing: 0.03em;
+  margin-top: 3px;
 }
 .case-cc {
   font-family: var(--serif);
   font-style: italic;
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.55;
+  font-size: 12.5px;
+  color: var(--ink);
+  line-height: 1.5;
   margin-top: 7px;
+}
+/* the plan, laid on the table */
+.table-plan {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 8px 2px 2px;
 }
 
 .side {
@@ -332,8 +357,7 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 /* ---------- right rail: transcript over next steps ---------- */
 .rail {
   display: grid;
-  grid-template-rows: minmax(0, 1.25fr) minmax(0, 1fr);
-  gap: 14px;
+  grid-template-rows: minmax(0, 1fr);
   min-height: 0;
   min-width: 0;
 }
@@ -548,8 +572,9 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   body { overflow: auto; }
   .app { height: auto; min-height: 100vh; }
   .main { grid-template-columns: 1fr; }
-  .rail { grid-template-rows: 340px 340px; }
-  .table-surface { width: min(420px, 60vw); }
+  .rail { grid-column: 1; grid-row: 2; grid-template-rows: 420px; }
+  .chamber { grid-column: 1; grid-row: 1; }
+  .table-surface { width: min(340px, 60vw); }
 }
 
 /* your-move banner — the app must never look stuck while waiting on the clinician.
