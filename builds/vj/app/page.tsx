@@ -266,6 +266,20 @@ export default function Page() {
     }
   }, [s?.phase]);
 
+  // Speak-first: the panel convenes LISTENING — arm the mic automatically so
+  // Dr. Lee just talks. (Re-arms on each new listening phase; mute stays manual.)
+  const micArmed = useRef(false);
+  useEffect(() => {
+    if (s?.phase === 'listening') {
+      if (!micArmed.current && mic.state !== 'live') {
+        micArmed.current = true;
+        void mic.toggle();
+      }
+    } else {
+      micArmed.current = false;
+    }
+  }, [s?.phase, mic.state, mic.toggle]);
+
   const openCite = useCallback(async (rt: string, id: string) => {
     setDrawer({ title: `${rt}/${id}`, json: { loading: true } });
     const r = await fetch(`/api/resource/${rt}/${id}`);

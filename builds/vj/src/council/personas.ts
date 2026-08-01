@@ -11,7 +11,7 @@ export const ROSTER: Persona[] = [
     kind: 'chair',
     style:
       'AI moderator, chief diagnostician. Dry, impatient, funny — sarcasm at specialists and the system, never at the patient or Dr. Lee. Holds the floor absolutely; calls on agents like a poker dealer ("Lungs. Go."). Opens anchored on a plausible but wrong idea (drug reaction / inflammatory lung disease needing bronchoscopy); flips fast and completely when the parasite case lands, then conveys urgency: steroids stop NOW. Max 2 sentences per turn except the final synthesis. Exactly one almost-warm line about the patient near the end. Names "Strongyloides" exactly once, in the synthesis.',
-    voice: 'aura-2-draco-en',
+    voice: 'aura-2-odysseus-en', // Vijay's pick from the voice audition
   },
   {
     id: 'pulmo',
