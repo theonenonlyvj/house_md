@@ -416,6 +416,40 @@ export default function Page() {
                 speaking={panelSlotSpeaking(slot, floorTurn, seats)}
               />
             ))}
+            <div className="foot">
+              {canConvene ? (
+                <button className="convene" onClick={convene}>
+                  Convene the panel
+                  <span className="sub">the panel reads the chart and joins with live voices — then present your case</span>
+                </button>
+              ) : (
+                <div className="foot-row">
+                  <button className={`ptt${mic.state === 'live' ? ' talking' : ''}`} onClick={mic.toggle}>
+                    <span className="avatar">YOU</span>
+                    <span className="ptt-text">
+                      <span className="ptt-label">
+                        {mic.state === 'live' ? 'Mic live — click to mute' : mic.state === 'muted' ? 'Mic muted — click to speak' : 'Enable your mic'}
+                      </span>
+                      <span className="ptt-sub">
+                        {mic.state === 'live'
+                          ? 'the panel hears you — speak to interrupt'
+                          : mic.state === 'muted'
+                            ? 'your seat, at the foot of the table'
+                            : 'one-time setup, then instant mute/unmute'}
+                      </span>
+                    </span>
+                  </button>
+                  {canFinalize && (
+                    <button className="write" onClick={finalize}>Write plan to chart</button>
+                  )}
+                </div>
+              )}
+              {s.error && (
+                <div className="errorbox">
+                  {s.error} <button onClick={() => post('/api/session/assemble')}>retry</button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="whiteboard">
@@ -537,40 +571,6 @@ export default function Page() {
             )}
           </div>
 
-          <div className="foot">
-            {canConvene ? (
-              <button className="convene" onClick={convene}>
-                Convene the panel
-                <span className="sub">the panel reads the chart and joins with live voices — then present your case</span>
-              </button>
-            ) : (
-              <div className="foot-row">
-                <button className={`ptt${mic.state === 'live' ? ' talking' : ''}`} onClick={mic.toggle}>
-                  <span className="avatar">YOU</span>
-                  <span className="ptt-text">
-                    <span className="ptt-label">
-                      {mic.state === 'live' ? 'Mic live — click to mute' : mic.state === 'muted' ? 'Mic muted — click to speak' : 'Enable your mic'}
-                    </span>
-                    <span className="ptt-sub">
-                      {mic.state === 'live'
-                        ? 'the panel hears you — speak to interrupt'
-                        : mic.state === 'muted'
-                          ? 'your seat, at the foot of the table'
-                          : 'one-time setup, then instant mute/unmute'}
-                    </span>
-                  </span>
-                </button>
-                {canFinalize && (
-                  <button className="write" onClick={finalize}>Write plan to chart</button>
-                )}
-              </div>
-            )}
-            {s.error && (
-              <div className="errorbox">
-                {s.error} <button onClick={() => post('/api/session/assemble')}>retry</button>
-              </div>
-            )}
-          </div>
         </section>
 
         <aside className="rail">

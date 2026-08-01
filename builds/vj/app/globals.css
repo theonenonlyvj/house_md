@@ -266,11 +266,10 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 /* the panel — fixed cast strip at the top of the room */
 .experts {
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px 12px;
   flex-shrink: 0;
-  padding: 6px 4px 4px;
+  padding: 4px 4px 2px;
 }
 
 /* seats: avatar + brief label */
@@ -328,13 +327,19 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 .seat.reimb.speaking .seat-label { color: var(--teal-deep); }
 
 /* ---------- the foot: your seat, and only what the flow needs ---------- */
+/* The clinician's controls sit at the right end of the panel strip — the bottom of
+   the room belongs to the board. */
 .foot {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding-bottom: 2px;
+  margin-left: auto;
 }
+.foot .convene { flex-direction: row; gap: 8px; padding: 9px 20px; font-size: 14px; border-radius: 999px; }
+.foot .convene .sub { display: none; }
+.foot .ptt { padding: 7px 16px; }
+.foot .ptt-sub { display: none; }
+.foot .ptt-label { font-size: 13px; }
 .foot-row { display: flex; align-items: center; gap: 12px; }
 
 .convene {

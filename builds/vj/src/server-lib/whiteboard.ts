@@ -58,16 +58,58 @@ Return ONE raw SVG document and nothing else — no prose, no markdown fence.
 
 Hard requirements:
 - <svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"> — every element inside those bounds, nothing clipped.
-- Background: corkboard (warm brown, subtle grain via a few <circle> speckles or a <pattern>).
-- The patient card is always pinned top-left and always readable: name in bold, then "age · sex · DOB", then the chief complaint in quotes, verbatim. It is the only header the board gets.
-- Evidence as pinned index cards / photos: white-ish <rect> with a slight rotate() transform, a red pushpin <circle>, short readable text (12-15px, sans-serif, dark ink). Wrap long text yourself across <tspan> lines; never let text overflow its card.
-- Red string: <path>/<line> in crimson connecting cards that relate — supporting evidence to its diagnosis, contradictions in a dashed line, workup hanging off the leading diagnosis. Draw the string BEHIND the cards.
-- The leading diagnosis is the visual centre: bigger card, red marker circle around it.
-- Keep evidence aliases (E1, E2…) printed on the cards they came from — they are the citation trail.
-- Stay inside the drawable region: every x coordinate between 40 and ${w - 40}, every y between 40 and ${h - 40}. A card is up to 200 wide and 110 tall, so no card's x may exceed ${w - 240} and no card's y may exceed ${h - 150}. Nothing may cross the canvas edge.
-- Stamp "CONJECTURE" in a corner of the specific card carrying the uncited claim, small and clear of that card's text; never present a conjecture as established, and never stamp a card whose claim was cited.
-- Cards must never overlap each other — leave at least 12px of cork between them. Use no more than ~18 cards; drop the least important rather than overcrowding.
 - Static SVG only: no <script>, no external images, no foreignObject, no event attributes.
+- Only draw what the notes give you. Never invent a finding, a citation or a number.
+
+HOUSE STYLE — follow these values exactly, every time, so every redraw looks like the
+same board. Do not improvise colours, sizes or positions.
+
+Palette (use these hex values and no others):
+  cork #c9a075, cork speckle #b98e60, card #fdfbf4, card edge #d9cfbb,
+  ink #1c1a17, muted ink #6b6357, string #9d1420, pin #b3121c,
+  leading card #fffdf3 with a #9d1420 2px border, conjecture stamp #9d1420.
+
+Structure — one <defs> with a drop-shadow filter and the cork pattern, then in order:
+  1. full-canvas cork <rect>, 2. all string <path>s, 3. all cards, 4. all pins.
+  Strings always sit behind cards; pins always on top of their own card.
+
+Card geometry — fixed sizes only, no other dimensions:
+  standard card 212 × 96, leading card 286 × 128, workup card 190 × 78.
+  Corner radius 3. Drop shadow via the filter. Rotation between -2.5 and 2.5 degrees,
+  applied as transform="rotate(a cx cy)" about the card's own centre.
+  Pin: <circle r="5.5" fill="#b3121c"> at the card's top centre, 9px below its top edge.
+
+Typography — no other sizes:
+  card title 13.5px bold #1c1a17; body 11.5px #1c1a17, line-height 14px via <tspan dy>;
+  alias / meta 9.5px bold #6b6357 letter-spacing 0.06em; leading title 17px bold #9d1420.
+  Font-family "Helvetica Neue", Helvetica, Arial, sans-serif on every text element.
+  Wrap body text yourself at ~30 characters per <tspan> line, max 3 lines, then ellipsis.
+  Text never leaves its card: first baseline 16px below the card top, 12px side padding.
+
+Layout zones — place every card in one of these, top to bottom within the zone:
+  PATIENT: x=28, y=28 (standard card, but 128 tall). Name bold, then "age · sex · DOB",
+    then the chief complaint in quotes, verbatim. The board gets no other header.
+  EVIDENCE (cited chart facts, alias printed as the card's meta line): left column,
+    x=28, first y=172, each next card 108 lower.
+  POSITIONS (what each specialty argued, titled with the specialty): right column,
+    x=${w - 240}, first y=28, each next card 108 lower.
+  LEADING DIAGNOSIS: centred at x=${Math.round((w - 286) / 2)}, y=${Math.round(h * 0.42) - 64}. Leading card style,
+    plus one #9d1420 circle (no fill, 1.5px stroke, opacity 0.5) drawn around it.
+  WORKUP: bottom row, y=${h - 28 - 78}, starting x=268, cards spaced 12 apart.
+  Nothing may cross the canvas edge and no two cards may overlap — leave ≥12px of cork
+  between them. If a zone is full, drop the least important card rather than overflow.
+
+String rules:
+  supporting evidence → its diagnosis: solid #9d1420, 2px, opacity 0.85.
+  contradiction / uncertainty: same colour, 2px, stroke-dasharray="7 5".
+  workup card → leading diagnosis: solid, 1.5px, opacity 0.6.
+  Draw as a slightly curved <path> (quadratic), never a straight <line>.
+
+Content rules:
+  Keep evidence aliases (E1, E2…) on the cards they came from — that is the citation trail.
+  Stamp "CONJECTURE" (10px bold #9d1420, rotated -8°) in the bottom-right corner of a card
+  whose claim was NOT cited, clear of its text. Never stamp a cited card.
+  At most 16 cards total.
 
 The board so far (only draw what is here — invent nothing):
 ${b}
@@ -82,6 +124,49 @@ SVG's, rescale the layout to the new size. Return the complete updated SVG.
 ${prev}` : ''}`;
 
 // SVG from a model is untrusted markup rendered into the page: strip anything active.
+// The model drifts past the bounds it was given. Rather than clip a card off the edge,
+// widen the viewBox to whatever it actually drew and let the browser scale it to fit —
+// the board shrinks a little instead of losing evidence.
+export function fit(svg: string): string {
+  const open = svg.match(/^<svg[^>]*>/)?.[0];
+  const vb = open?.match(/viewBox="\s*(-?[\d.]+)[\s,]+(-?[\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/);
+  if (!open || !vb) return svg;
+  const [vx, vy, vw, vh] = vb.slice(1).map(Number);
+  let maxX = vx + vw;
+  let maxY = vy + vh;
+  // Cards are usually drawn inside translated groups, so track the group offsets —
+  // without them every coordinate reads as if it were at the origin.
+  const stack: { x: number; y: number }[] = [{ x: 0, y: 0 }];
+  for (const tag of svg.match(/<[^>]+>/g) || []) {
+    const top = stack[stack.length - 1];
+    if (/^<\/g/.test(tag)) {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    if (/^<g[\s>]/.test(tag)) {
+      const t = tag.match(/translate\(\s*(-?[\d.]+)[\s,]+(-?[\d.]+)/);
+      const next = { x: top.x + (t ? Number(t[1]) : 0), y: top.y + (t ? Number(t[2]) : 0) };
+      maxX = Math.max(maxX, next.x);
+      maxY = Math.max(maxY, next.y);
+      if (!/\/>$/.test(tag)) stack.push(next);
+      continue;
+    }
+    const n = (name: string) => {
+      const m = tag.match(new RegExp(`\\b${name}="\\s*(-?[\\d.]+)`));
+      return m ? Number(m[1]) : null;
+    };
+    const w = n('width') ?? n('r') ?? 0;
+    const h = n('height') ?? n('r') ?? 0;
+    for (const right of [n('x') !== null ? n('x')! + w : null, n('cx') !== null ? n('cx')! + w : null, n('x1'), n('x2')])
+      if (right !== null && Number.isFinite(right)) maxX = Math.max(maxX, right + top.x);
+    for (const bottom of [n('y') !== null ? n('y')! + h : null, n('cy') !== null ? n('cy')! + h : null, n('y1'), n('y2')])
+      if (bottom !== null && Number.isFinite(bottom)) maxY = Math.max(maxY, bottom + top.y);
+  }
+  if (maxX <= vx + vw && maxY <= vy + vh) return svg;
+  const grown = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${vx} ${vy} ${maxX - vx + 16} ${maxY - vy + 16}" preserveAspectRatio="xMidYMid meet" width="100%" height="100%">`;
+  return grown + svg.slice(open.length);
+}
+
 export function sanitize(raw: string): string {
   const start = raw.indexOf('<svg');
   if (start < 0) throw new Error(`model returned no SVG: ${raw.slice(0, 120)}`);
@@ -89,7 +174,7 @@ export function sanitize(raw: string): string {
   // A board cut off at the token limit still shows most of its cards — keep what
   // parsed, drop the half-written tag, and let the parser close the open groups.
   const body = end >= 0 ? raw.slice(start, end + 6) : `${raw.slice(start, raw.lastIndexOf('>') + 1)}</svg>`;
-  return body
+  return fit(body)
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
