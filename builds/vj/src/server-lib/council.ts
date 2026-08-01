@@ -209,7 +209,18 @@ async function runTool(name: string, args: any): Promise<unknown> {
     const hits = mossHits ?? searchEvidence(chart, q, 10);
     const source = mossHits ? 'Moss semantic search' : 'chart keyword search';
     mutate((s) => { s.activity = `${source}: ${hits.length} of ${chart.aliases.length} records for "${q.slice(0, 50)}"`; });
-    return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
+    // Chronological sweep: longitudinal charts hide old clues search queries never
+    // reach. Always include the oldest records the search DIDN'T return, labeled.
+    const hitAliases = new Set(hits.map((h) => h.alias));
+    const olderHistory = chart.aliases
+      .filter((a) => a.date && !hitAliases.has(a.alias))
+      .sort((a, b) => (a.date! < b.date! ? -1 : 1))
+      .slice(0, 4);
+    return {
+      evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, date: h.date, fact: h.fact })),
+      oldest_history_not_in_results: olderHistory.map((h) => ({ alias: h.alias, resourceType: h.resourceType, date: h.date, fact: h.fact })),
+      note: 'oldest_history_not_in_results = the deep archive your query missed — old clues often matter; cite by alias like any evidence.',
+    };
   }
 
   if (name === 'submit_council_output') {
@@ -498,7 +509,7 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
     }
     if (msg.type === 'Warning') {
       // SLOW_THINK_REQUEST is routine for gpt-5-mini — surface as activity, not error.
-      mutate((s) => { s.activity = `model thinking… (${msg.code || 'warning'})`; });
+      mutate((s) => { s.activity = 'the council is thinking — deep reasoning takes a few seconds…'; });
       if (String(msg.code || msg.description || '').includes('THINK_REQUEST_FAILED') && !isRetry) {
         openAgent(presentation, 'gpt-4o-mini', true);
       }

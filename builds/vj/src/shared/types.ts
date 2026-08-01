@@ -59,6 +59,7 @@ export interface EvidenceRef {
   resourceId: string;
   display: string;
   fact: string;
+  date?: string; // effective/performed date — powers the chronological sweep
 }
 
 export interface Argument {

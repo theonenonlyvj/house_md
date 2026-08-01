@@ -116,6 +116,7 @@ export async function loadChart(force = false): Promise<LoadedChart> {
     resourceId: r.id,
     display: (textOf(r) || r.resourceType).slice(0, 90),
     fact: textOf(r).slice(0, 240),
+    date: r.performedDateTime || r.effectiveDateTime || r.recordedDate || r.period?.start || r.occurrenceDateTime || undefined,
   }));
 
   const name = patient.name?.[0];
