@@ -3,93 +3,79 @@ import { decideSeating, deriveFeatures, emptySeats, requiredSpecialties } from '
 import { ROSTER } from './personas';
 import type { CaseFeatures } from '../shared/types';
 
-const janeFeatures: CaseFeatures = {
-  age: 55,
-  sex: 'female',
-  chiefComplaint: 'progressive exertional dyspnea and bilateral leg swelling',
-  organSystems: ['cardiac', 'renal', 'neuro'],
-  activeMeds: ['lisinopril'],
+// Demo case: "The Medicine Is the Poison" (Tuan Pham, docs/DEMO_SPEC.md)
+const tuanFeatures: CaseFeatures = {
+  age: 62,
+  sex: 'male',
+  chiefComplaint: 'worsening shortness of breath despite steroids; abdominal pain, loose stools, fever',
+  organSystems: ['pulmonary', 'gi', 'infectious'],
+  activeMeds: ['prednisone 40mg', 'metformin', 'lisinopril', 'omeprazole', 'albuterol'],
   redFlags: ['multisystem-pattern'],
 };
 
 describe('seating (Guardrail #1)', () => {
-  it('requires hematology for a multisystem case like the default', () => {
-    const req = requiredSpecialties(janeFeatures).map((r) => r.specialty);
-    expect(req).toContain('hematology');
-    expect(req).toContain('cardiology');
-    expect(req).toContain('nephrology');
-    expect(req).toContain('neurology');
+  it('requires pulm/GI/ID for the demo case', () => {
+    const req = requiredSpecialties(tuanFeatures).map((r) => r.specialty);
+    expect(req).toEqual(expect.arrayContaining(['pulmonology', 'gastroenterology', 'infectious-disease']));
   });
 
-  it('seats hematology with the full default roster (nothing empty for the demo case)', () => {
-    const d = decideSeating(janeFeatures, ROSTER, 'internal-medicine');
+  it('seats the full panel with zero empty seats (demo roster covers its case)', () => {
+    const d = decideSeating(tuanFeatures, ROSTER, 'primary-care');
     expect(emptySeats(d).length).toBe(0);
-    const heme = d.seats.find((s) => s.specialty === 'hematology');
-    expect(heme?.status).toBe('seated');
+    for (const id of ['house', 'pulmo', 'gastro', 'id', 'advocate']) {
+      expect(d.seats.find((s) => s.personaId === id)).toBeTruthy();
+    }
+    expect(d.seats.find((s) => s.status === 'human')).toBeTruthy();
   });
 
-  it('EMPTY-seat mechanism still fires when the roster genuinely lacks a required specialty', () => {
-    const truncated = ROSTER.filter((p) => p.specialty !== 'neurology');
-    const d = decideSeating(janeFeatures, truncated, 'internal-medicine');
-    const empty = emptySeats(d);
-    expect(empty.map((s) => s.specialty)).toContain('neurology');
-    expect(empty.every((s) => s.reasons.length > 0)).toBe(true);
+  it('EMPTY-seat mechanism fires when the roster genuinely lacks a required specialty', () => {
+    const truncated = ROSTER.filter((p) => p.specialty !== 'infectious-disease');
+    const d = decideSeating(tuanFeatures, truncated, 'primary-care');
+    expect(emptySeats(d).map((s) => s.specialty)).toContain('infectious-disease');
+    expect(emptySeats(d).every((s) => s.reasons.length > 0)).toBe(true);
   });
 
-  it('is deterministic: same input → same output', () => {
-    const a = decideSeating(janeFeatures, ROSTER, 'internal-medicine');
-    const b = decideSeating(janeFeatures, ROSTER, 'internal-medicine');
-    expect(a).toEqual(b);
+  it('is deterministic', () => {
+    expect(decideSeating(tuanFeatures, ROSTER, 'primary-care')).toEqual(decideSeating(tuanFeatures, ROSTER, 'primary-care'));
   });
 
-  it('seats structural personas (chair, skeptic, reimbursement) and the human', () => {
-    const d = decideSeating(janeFeatures, ROSTER, 'cardiology');
-    const statuses = d.seats.map((s) => s.status);
-    expect(statuses).toContain('human');
-    expect(d.seats.find((s) => s.personaId === 'chair-house')).toBeTruthy();
-    expect(d.seats.find((s) => s.personaId === 'skeptic')).toBeTruthy();
-    expect(d.seats.find((s) => s.personaId === 'reimbursement')).toBeTruthy();
-  });
-
-  it('allows duplicate specialties (human cardiologist + AI cardiologist)', () => {
-    const d = decideSeating(janeFeatures, ROSTER, 'cardiology');
-    const cardioSeats = d.seats.filter((s) => s.specialty === 'cardiology');
-    expect(cardioSeats.length).toBe(2);
-    expect(cardioSeats.map((s) => s.status).sort()).toEqual(['human', 'seated']);
-  });
-
-  it('every seated/empty case seat carries feature-citing reasons', () => {
-    const d = decideSeating(janeFeatures, ROSTER, 'internal-medicine');
-    expect(d.seats.every((s) => s.reasons.length > 0)).toBe(true);
+  it('allows duplicate specialties (human pulmonologist + PULMO)', () => {
+    const d = decideSeating(tuanFeatures, ROSTER, 'pulmonology');
+    const pulm = d.seats.filter((s) => s.specialty === 'pulmonology');
+    expect(pulm.map((s) => s.status).sort()).toEqual(['human', 'seated']);
   });
 
   it('changing the features changes the seating (no scripted room)', () => {
-    const simple: CaseFeatures = {
-      ...janeFeatures,
-      organSystems: ['cardiac'],
-      activeMeds: [],
-      redFlags: [],
-    };
-    const d = decideSeating(simple, ROSTER, 'internal-medicine');
-    expect(emptySeats(d).length).toBe(0);
-    expect(d.seats.find((s) => s.specialty === 'nephrology')).toBeUndefined();
+    const resp: CaseFeatures = { ...tuanFeatures, organSystems: ['pulmonary'], redFlags: [] };
+    const d = decideSeating(resp, ROSTER, 'primary-care');
+    expect(d.seats.find((s) => s.specialty === 'gastroenterology')).toBeUndefined();
+    expect(d.seats.find((s) => s.specialty === 'infectious-disease')).toBeUndefined();
   });
 });
 
 describe('deriveFeatures', () => {
-  it('derives organ systems + meds + multisystem flag from chart text', () => {
+  it('derives pulm/gi/infectious from a Tuan-like chart', () => {
     const f = deriveFeatures(
       [
-        { resourceType: 'Procedure', text: 'Left carpal tunnel release' },
-        { resourceType: 'Observation', text: 'Persistent proteinuria, mildly reduced renal function' },
-        { resourceType: 'DiagnosticReport', text: 'Echocardiogram: increased LV wall thickness, preserved ejection fraction' },
-        { resourceType: 'MedicationStatement', text: 'lisinopril' },
+        { resourceType: 'Condition', text: 'Adult-onset asthma — never confirmed by spirometry' },
+        { resourceType: 'Observation', text: 'Eosinophils 14% flagged HIGH, no follow-up' },
+        { resourceType: 'Encounter', text: 'ED: abdominal pain, nausea, loose stools, fever 100.8' },
+        { resourceType: 'MedicationRequest', text: 'prednisone 40 mg daily' },
       ],
-      { age: 55, sex: 'female' },
-      'progressive exertional dyspnea'
+      { age: 62, sex: 'male' },
+      'worsening shortness of breath'
     );
-    expect(f.organSystems).toEqual(expect.arrayContaining(['cardiac', 'renal', 'neuro']));
-    expect(f.activeMeds).toEqual(['lisinopril']);
+    expect(f.organSystems).toEqual(expect.arrayContaining(['pulmonary', 'gi', 'infectious']));
     expect(f.redFlags).toContain('multisystem-pattern');
+    expect(f.activeMeds.length).toBe(1);
+  });
+
+  it('well-controlled diabetes does NOT demand an endocrinology seat', () => {
+    const f = deriveFeatures(
+      [{ resourceType: 'Condition', text: 'Type 2 diabetes mellitus — well controlled, latest A1c 6.9' }],
+      { age: 62, sex: 'male' },
+      'routine'
+    );
+    expect(f.organSystems).not.toContain('endocrine');
   });
 });

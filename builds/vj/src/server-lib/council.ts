@@ -246,23 +246,20 @@ async function runTool(name: string, args: any): Promise<unknown> {
       ...differential.flatMap((d) => [...d.supporting, ...d.contradicting]),
     ].filter((a) => a.provenance === 'conjecture').length;
 
-    // Audible council: queue up to TWO heard lines — first cited specialist + the
-    // skeptic — in their own voices (PLAN-FINAL §3). Played after chair audio ends.
-    // The model's personaId strings are loose (id/name/specialty) — resolve fuzzily.
+    // Audible panel: every specialist speaks their turn in their own voice, in roster
+    // order (the DEMO_SPEC runbook), queued behind current speech. Model personaId
+    // strings are loose (id/name/specialty) — resolve fuzzily.
     const personaOf = (c: SpecialistContribution) =>
       ROSTER.find((r) => r.id === c.personaId) ||
-      ROSTER.find((r) => r.name === c.personaId) ||
+      ROSTER.find((r) => r.name === c.personaId || r.name.toLowerCase() === String(c.personaId).toLowerCase()) ||
       ROSTER.find((r) => r.specialty === c.specialty) ||
       ROSTER.find((r) => c.specialty.toLowerCase().includes(r.specialty.split('-')[0]));
     const heard: typeof live.pendingLines = [];
-    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && personaOf(c)?.kind === 'specialist');
-    const skeptic = contributions.find((c) => personaOf(c)?.kind === 'skeptic');
-    for (const c of [firstCited, skeptic]) {
-      if (!c) continue;
-      const p = personaOf(c);
-      if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
+    for (const rp of ROSTER.filter((r) => r.kind === 'specialist')) {
+      const c = contributions.find((x) => personaOf(x)?.id === rp.id);
+      if (c && rp.voice) heard.push({ name: rp.name, voice: rp.voice, text: c.interpretation.claim, personaId: rp.id });
     }
-    live.pendingLines = heard.slice(0, 2);
+    live.pendingLines = heard.slice(0, 3);
     console.log('[council] queued audible lines:', live.pendingLines.length, live.pendingLines.map((l) => l.name));
     // Chair audio may already be done (AgentAudioDone can precede this tool call) —
     // schedule playback; the speaking flag + FIFO keep it overlap-safe.
@@ -384,13 +381,18 @@ function councilPrompt(): string {
     })
     .filter(Boolean)
     .join('\n');
+  const specialistOrder = seated
+    .map((seat) => ROSTER.find((r) => r.id === seat.personaId))
+    .filter((p) => p?.kind === 'specialist')
+    .map((p) => p!.name)
+    .join(', then ');
   return [
-    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). NEVER prefix your speech with any speaker label of any kind. BAD: "House: Good." BAD: "SPEAKING AS CHAIR (House, M.D.): Good." BAD: "Chair — Good." GOOD: "Good." You ARE the voice; just talk. You may quote at most two short specialist lines aloud, attributed by name mid-sentence.',
-    `SEATED COUNCIL (role-play each in structured output):\n${personas}`,
+    'You run a live AI panel consult as its entire cast (docs/DEMO_SPEC). SPOKEN VOICE: you speak ONLY as the chair/moderator — dry, fast, witty; max 2 sentences per turn except your final synthesis. NEVER prefix speech with any speaker label. BAD: "HOUSE: Good." GOOD: "Good." You ARE the voice.',
+    `THE PANEL (role-play each in structured output):\n${personas}`,
     empty.length
-      ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
+      ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. Say so on the record; NO ONE improvises missing expertise.`
       : '',
-    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
+    `RULES: (1) Decision support, not diagnosis — the panel argues, the clinician decides; never present a diagnosis as established. The human clinician is ${'Dr. Lee'}; "Can you take a look?" hands you the floor. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches from different angles (current symptoms; labs over the years; old intake/social history and notes — longitudinal records hide the good clues years back; also read oldest_history_not_in_results). Cite only returned aliases (E1, E2…) in tool JSON; uncited claims auto-label CONJECTURE. (3) Turn order: ${specialistOrder} — each specialist's contribution cites a specific dated chart item; then submit via submit_council_output. (4) PLAIN ENGLISH for a lay audience: everyday words first, at most one technical term per turn, introduced after the plain phrase ("look inside his lungs with a camera — a bronchoscopy"). (5) Challenge the weakest-cited claim before accepting it. (6) After the clinician selects the direction: propose_workup (tests AND any consult/treatment the pathway warrants), then get_benefits — the ADVOCATE has already spoken the returned figures; don't repeat them, connect the affordable plan to the safe plan. Never invent prices or coverage. (7) SPOKEN OUTPUT: after each tool call, ONE short line and hand the floor. NEVER read structured output, bullets, or lists aloud — the table shows the detail.`,
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
@@ -479,7 +481,7 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       }, 5000);
       // Drive the debate: inject the presentation as the clinician's opening.
       setTimeout(() => {
-        inject(`${presentation}\n\nChair: convene the council. Have each seated specialist argue their read (search the chart first), then submit via submit_council_output.`);
+        inject(`${presentation}\n\n[Dr. Lee has handed you the floor. Convene the panel: each specialist in turn order argues from the chart (search it first — including the old records), then submit via submit_council_output.]`);
       }, 1200);
       return;
     }

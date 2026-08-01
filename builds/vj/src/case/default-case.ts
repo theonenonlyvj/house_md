@@ -1,40 +1,38 @@
-// The engine is case-agnostic; THIS FILE is the pluggable input (PLAN-FINAL §4).
-// >>> NOAH: your seeded patient plugs in here — fill `patientLocator` (and anything
-// else marked FILL) once your seed lands. Nothing outside this file changes. <<<
+// The engine is case-agnostic; THIS FILE is the pluggable input.
+// Active demo: "The Medicine Is the Poison" (docs/DEMO_SPEC.md) — Tuan Pham,
+// seeded by scripts/seed-tuan-pham.mjs.
 
 export interface CaseConfig {
   id: string;
   title: string;
-  // How the app finds the patient in hosted Medplum. Use EITHER a direct id or an
-  // identifier search (system+value). FILL from Noah's seed output.
   patientLocator: {
-    patientId?: string; // e.g. '0198...'  (FILL when known)
+    patientId?: string;
     identifier?: { system: string; value: string };
-    nameFallback?: { family: string; given: string }; // last-resort search
+    nameFallback?: { family: string; given: string };
   };
-  // Presenter-facing default presentation (also the prerecorded-audio script).
   chiefComplaint: string;
   presentation: string;
-  // The human at the table (Vijay may respecify).
   clinicianSpecialty: string;
-  // Stedi test-mode scenario key from stedi-poc/scenarios.mjs.
+  clinicianName: string;
   stediScenario: string;
   payerLabel: string;
 }
 
 export const DEFAULT_CASE: CaseConfig = {
-  id: 'default',
-  title: 'Complicated multisystem presentation (synthetic)',
+  id: 'tuan-pham',
+  title: 'The Medicine Is the Poison (synthetic)',
   patientLocator: {
-    // FILL: patientId from Noah's seed. Fallbacks below let the app find a
-    // "Jane Doe"-style synthetic patient in the meantime.
-    identifier: { system: 'https://housemd.example/seed', value: 'patient-jane-doe' },
-    nameFallback: { family: 'Doe', given: 'Jane' },
+    identifier: { system: 'https://housemd.example/seed', value: 'patient-tuan-pham' },
+    nameFallback: { family: 'Pham', given: 'Tuan' },
   },
-  chiefComplaint: 'progressive exertional dyspnea and bilateral leg swelling',
+  chiefComplaint:
+    'worsening shortness of breath despite steroids; new abdominal pain, nausea, loose stools, low-grade fever',
+  // Dr. Lee's cue card (DEMO_SPEC §5) — she paraphrases live; this is the prerecorded
+  // fallback text. "Can you take a look?" is the handoff cue to the chair.
   presentation:
-    'Jane is a 55-year-old woman with progressive exertional dyspnea, bilateral leg edema, preserved ejection fraction, and increased ventricular wall thickness that seems disproportionate to her hypertension. What are we missing?',
-  clinicianSpecialty: 'internal-medicine',
+    "This is my patient Mr. Pham, he's 62. I diagnosed him with asthma last year and started steroids two weeks ago, but he keeps getting worse — and now he has stomach pain and a fever too. I'm debating two things: do I increase the steroids, or is there something else going on that I'm missing? Can you take a look?",
+  clinicianSpecialty: 'primary-care',
+  clinicianName: 'Dr. Lee',
   stediScenario: 'uhc',
-  payerLabel: 'UnitedHealthcare (Stedi test mode)',
+  payerLabel: 'Commercial PPO (Stedi test mode)',
 };
