@@ -492,7 +492,9 @@ export default function Page() {
             <div className="transcript" ref={transcriptRef}>
               {visibleTurns.length === 0 && (
                 <div className="placeholder">
-                  The room is quiet. Convene the panel, then open with your theory and your question — the panel takes it from there.
+                  {s.phase === 'listening'
+                    ? 'The panel is listening — your words land here as you speak.'
+                    : 'The room is quiet. Convene the panel, then open with your theory and your question — the panel takes it from there.'}
                 </div>
               )}
               {visibleTurns.map((t, i) => (
