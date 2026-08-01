@@ -154,7 +154,8 @@ const FUNCTION_DEFS = [
   },
   {
     name: 'propose_workup',
-    description: 'Propose 2-4 next workup steps for the selected leading hypothesis.',
+    description:
+      'Propose 2-4 next steps for the selected leading hypothesis — tests AND any specialist consultation/referral the direction warrants (standard pathways usually include one).',
     parameters: {
       type: 'object',
       properties: {
@@ -273,7 +274,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
       mutate((s) => {
         const referral = facts.messages.find((m) => /referral/i.test(m));
         for (const opt of s.workup) {
-          const isConsult = /consult|referral|cardiolog|specialist/i.test(opt.display);
+          const isConsult = /consult|referral|specialist|clinic visit|evaluation by/i.test(opt.display);
           if (isConsult) {
             opt.benefit = facts;
             if (referral) {
