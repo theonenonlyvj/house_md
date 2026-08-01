@@ -107,12 +107,11 @@ function useChairAudio(interrupted: boolean) {
   }, []);
 }
 
-// Always-on mic (setup on mount — zero click latency) with INSTANT mute/unmute.
-// While muted we stream zero-frames so Deepgram's turn detection never sees a stalled
-// stream; unmute is a pure flag flip. Default MUTED so room side-talk can't barge in.
-function useMic(): { state: 'off' | 'muted' | 'live'; toggle: () => void } {
-  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean; muted: boolean }>({ live: false, muted: true });
-  const [uiState, setUiState] = useState<'off' | 'muted' | 'live'>('off');
+// Always-on mic. Setup (permission + WS + worklet) happens on mount, then audio
+// streams continuously to the session's nova-3 listen leg; its VAD handles turns
+// and barge-in without another demo control or click.
+function useMic() {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean }>({ live: false });
   useEffect(() => {
     let cancelled = false;
     const unlock = () => { void ref.current.ctx?.resume(); };
@@ -136,12 +135,11 @@ function useMic(): { state: 'off' | 'muted' | 'live'; toggle: () => void } {
         node.port.onmessage = (e) => {
           const cur = ref.current;
           if (!cur.ws || cur.ws.readyState !== 1) return;
-          cur.ws.send(cur.muted ? new ArrayBuffer((e.data as ArrayBuffer).byteLength) : e.data);
+          cur.ws.send(e.data);
         };
         src.connect(node);
-        ws.onclose = () => { ref.current.live = false; setUiState('off'); };
-        ref.current = { ws, ctx, stream, live: true, muted: true };
-        setUiState('muted');
+        ws.onclose = () => { ref.current.live = false; };
+        ref.current = { ws, ctx, stream, live: true };
       } catch {}
     };
     void start();
@@ -153,49 +151,9 @@ function useMic(): { state: 'off' | 'muted' | 'live'; toggle: () => void } {
       current.stream?.getTracks().forEach((track) => track.stop());
       current.ws?.close();
       if (current.ctx) void current.ctx.close();
-      ref.current = { live: false, muted: true };
+      ref.current = { live: false };
     };
   }, []);
-  const toggle = useCallback(() => {
-    const r = ref.current;
-    if (!r.live) return;
-    r.muted = !r.muted;
-    void r.ctx?.resume();
-    setUiState(r.muted ? 'muted' : 'live');
-  }, []);
-  return { state: uiState, toggle };
-}
-
-// The detective board: an SVG drawn server-side for the exact pixel size of the table
-// and re-drawn whenever the session state version moves — new evidence, new board.
-function useBoard(version: number | undefined, on: boolean) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [svg, setSvg] = useState('');
-  const [drawing, setDrawing] = useState(false);
-  const [failed, setFailed] = useState('');
-  const drawnKey = useRef('');
-  useEffect(() => {
-    if (!on || version == null || !ref.current) return;
-    const r = ref.current.getBoundingClientRect();
-    const w = Math.round(r.width);
-    const h = Math.round(r.height);
-    if (w < 200 || h < 200) return;
-    const k = `${version}:${w}x${h}`;
-    if (drawnKey.current === k) return;
-    drawnKey.current = k;
-    let alive = true;
-    setDrawing(true);
-    fetch(`/api/whiteboard?w=${w}&h=${h}`)
-      .then((res) => res.json())
-      .then((d) => {
-        if (!alive) return;
-        if (d.svg) { setSvg(d.svg); setFailed(''); } else setFailed(d.error || 'board unavailable');
-      })
-      .catch(() => alive && setFailed('board unavailable'))
-      .finally(() => alive && setDrawing(false));
-    return () => { alive = false; };
-  }, [version, on]);
-  return { ref, svg, drawing, failed };
 }
 
 // Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
@@ -236,10 +194,7 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const [boardOn, setBoardOn] = useState(true);
-  const mic = useMic();
-  const hasEvidence = !!s && (s.differential.length > 0 || s.contributions.length > 0 || s.transcript.length > 0);
-  const board = useBoard(s?.version, boardOn && hasEvidence);
+  useMic();
   useChairAudio(s?.activity === 'hearing you…');
 
   useEffect(() => {
@@ -324,21 +279,7 @@ export default function Page() {
             );
           })}
 
-          {boardOn && hasEvidence && (
-            <div className="board" ref={board.ref}>
-              {board.svg ? (
-                <div className="board-svg" dangerouslySetInnerHTML={{ __html: board.svg }} />
-              ) : (
-                <div className="board-note">{board.failed || 'pinning the evidence…'}</div>
-              )}
-              {board.drawing && board.svg && <div className="board-badge">re-drawing…</div>}
-              {board.failed && board.svg && <div className="board-badge err">{board.failed}</div>}
-            </div>
-          )}
-
-          {/* The board says the same things as the case record — showing both duplicates
-              every card, so the record steps aside while the board is up. */}
-          <div className="center" hidden={boardOn && hasEvidence}>
+          <div className="center">
             {s.phase === 'differential-ready' && !s.selectedHypothesisId && (
               <div className="yourmove">⚖️ The council rests — <strong>your call, doctor</strong>: select the leading diagnosis below.</div>
             )}
@@ -449,17 +390,7 @@ export default function Page() {
                 🩺 Assemble council
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
-              <button onClick={() => setBoardOn((v) => !v)} title="Detective board — re-drawn as evidence lands">
-                {boardOn ? '🧵 board on' : '🧵 board off'}
-              </button>
             </div>
-            <button
-              className={`primary ptt ${mic.state === 'live' ? 'talking' : ''}`}
-              disabled={s.phase === 'case-ready'}
-              onClick={mic.toggle}
-            >
-              {mic.state === 'live' ? '🔴 MIC LIVE — click to mute' : mic.state === 'muted' ? '🎙 Mic muted — click to speak' : '🎙 Enable mic'}
-            </button>
             <div className="row">
               <input
                 type="text"
@@ -472,23 +403,6 @@ export default function Page() {
               />
               <button onClick={() => { if (text.trim()) { post('/api/session/say', { text }); setText(''); } }}>say</button>
             </div>
-            {/* With the case record hidden behind the board, the clinician still makes
-                the call from here — the selection never moves off the human. */}
-            {boardOn && hasEvidence && s.differential.length > 0 && (
-              <div className="pick">
-                <div className="rail-label">Your call — leading diagnosis</div>
-                {s.differential.map((d) => (
-                  <button
-                    key={d.id}
-                    className={d.status === 'leading' ? 'primary' : ''}
-                    disabled={d.status === 'leading'}
-                    onClick={() => post('/api/session/select', { id: d.id })}
-                  >
-                    {d.rank}. {d.display}
-                  </button>
-                ))}
-              </div>
-            )}
             <div className="row">
               <button
                 className="primary"

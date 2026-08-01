@@ -10,6 +10,12 @@ describe('whiteboard', () => {
     expect(out).toContain('fill="red"');
   });
 
+  it('keeps a board that was cut off at the token limit', () => {
+    const out = sanitize('<svg width="10"><g><rect fill="red"/><text>half a car');
+    expect(out).toContain('<rect fill="red"/>');
+    expect(out.endsWith('</svg>')).toBe(true);
+  });
+
   it('rejects a non-SVG response instead of injecting it', () => {
     expect(() => sanitize('sorry, I cannot draw that')).toThrow();
   });

@@ -53,7 +53,7 @@ export function brief(s: SessionState): string {
   return L.join('\n');
 }
 
-const prompt = (b: string, w: number, h: number) => `You are drawing a detective's evidence board on a corkboard for a clinical council session.
+const prompt = (b: string, w: number, h: number, prev: string) => `You are drawing a detective's evidence board on a corkboard for a clinical council session.
 Return ONE raw SVG document and nothing else — no prose, no markdown fence.
 
 Hard requirements:
@@ -63,27 +63,38 @@ Hard requirements:
 - Red string: <path>/<line> in crimson connecting cards that relate — supporting evidence to its diagnosis, contradictions in a dashed line, workup hanging off the leading diagnosis. Draw the string BEHIND the cards.
 - The leading diagnosis is the visual centre: bigger card, red marker circle around it.
 - Keep evidence aliases (E1, E2…) printed on the cards they came from — they are the citation trail.
-- Label conjecture cards with a "CONJECTURE" stamp; never present a conjecture as established.
-- Use no more than ~18 cards; drop the least important rather than overcrowding.
+- Stay inside the drawable region: every x coordinate between 40 and ${w - 40}, every y between 40 and ${h - 40}. A card is up to 200 wide and 110 tall, so no card's x may exceed ${w - 240} and no card's y may exceed ${h - 150}. Nothing may cross the canvas edge.
+- Stamp "CONJECTURE" in a corner of the specific card carrying the uncited claim, small and clear of that card's text; never present a conjecture as established, and never stamp a card whose claim was cited.
+- Cards must never overlap each other — leave at least 12px of cork between them. Use no more than ~18 cards; drop the least important rather than overcrowding.
 - Static SVG only: no <script>, no external images, no foreignObject, no event attributes.
 
 The board so far (only draw what is here — invent nothing):
-${b}`;
+${b}
+${prev ? `
+This is the board as it currently hangs. Do NOT start over: keep every existing card in
+place with its wording, position and rotation, and change only what the notes above
+changed — pin the new cards into free space, run string from them to what they relate to,
+re-mark the leading diagnosis if it moved. If the canvas size above differs from this
+SVG's, rescale the layout to the new size. Return the complete updated SVG.
+
+${prev}` : ''}`;
 
 // SVG from a model is untrusted markup rendered into the page: strip anything active.
 export function sanitize(raw: string): string {
   const start = raw.indexOf('<svg');
+  if (start < 0) throw new Error(`model returned no SVG: ${raw.slice(0, 120)}`);
   const end = raw.lastIndexOf('</svg>');
-  if (start < 0 || end < 0) throw new Error('model returned no SVG');
-  return raw
-    .slice(start, end + 6)
+  // A board cut off at the token limit still shows most of its cards — keep what
+  // parsed, drop the half-written tag, and let the parser close the open groups.
+  const body = end >= 0 ? raw.slice(start, end + 6) : `${raw.slice(start, raw.lastIndexOf('>') + 1)}</svg>`;
+  return body
     .replace(/<script[\s\S]*?<\/script>/gi, '')
     .replace(/<foreignObject[\s\S]*?<\/foreignObject>/gi, '')
     .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
     .replace(/(href|xlink:href)\s*=\s*(["'])\s*(?!#)[^"']*\2/gi, '');
 }
 
-async function draw(s: SessionState, w: number, h: number): Promise<string> {
+async function draw(s: SessionState, w: number, h: number, prev: string): Promise<string> {
   const apiKey = key('OPENROUTER_API_KEY');
   if (!apiKey) throw new Error('OPENROUTER_API_KEY missing');
   const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -91,12 +102,21 @@ async function draw(s: SessionState, w: number, h: number): Promise<string> {
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       model: MODEL,
-      messages: [{ role: 'user', content: prompt(brief(s), w, h) }],
+      // Thinking off: it burned ~3k tokens per board and this is a drawing task, not a
+      // reasoning one — the reasoning budget is better spent on cards.
+      reasoning: { enabled: false },
+      max_tokens: 16000,
+      messages: [{ role: 'user', content: prompt(brief(s), w, h, prev) }],
     }),
   });
-  if (!res.ok) throw new Error(`OpenRouter ${res.status}`);
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 200)}`);
   const data = await res.json();
-  return sanitize(data.choices?.[0]?.message?.content || '');
+  const choice = data.choices?.[0];
+  try {
+    return sanitize(choice?.message?.content || '');
+  } catch (e) {
+    throw new Error(`${(e as Error).message} (finish_reason=${choice?.finish_reason})`);
+  }
 }
 
 // One draw per (state version, size). Concurrent callers share the in-flight request.
@@ -104,11 +124,16 @@ export function board(s: SessionState, version: number, w: number, h: number): P
   const cacheKey = `${version}:${w}x${h}`;
   if (cache.cacheKey === cacheKey) return Promise.resolve(cache.svg);
   if (cache.inflight) return cache.inflight;
-  cache.inflight = draw(s, w, h)
+  // Each draw amends the board that's already hanging — cards stay put, only the new
+  // evidence gets pinned — so the demo reads as one board growing, not a reshuffle.
+  cache.inflight = draw(s, w, h, cache.svg)
     .then((svg) => {
+      // ponytail: a draw that comes back a fraction of the board's size dropped most of
+      // the evidence — keep the old board rather than seed the next iteration from it.
+      const kept = cache.svg && svg.length < cache.svg.length * 0.4 ? cache.svg : svg;
       cache.cacheKey = cacheKey;
-      cache.svg = svg;
-      return svg;
+      cache.svg = kept;
+      return kept;
     })
     .finally(() => {
       cache.inflight = null;
