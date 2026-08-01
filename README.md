@@ -9,7 +9,7 @@ the leading dx into a feasible care plan. Decision support, not diagnosis: the a
 argues, the doctor decides.
 
 Built in one day at the YC × Medplum Agentic Healthcare Hackathon (Aug 1, 2026) by
-Vijay Ram, Thai Nguyen, and Noah Landesberg.
+Vijay Ram, Thai Nguyen, Noah Landesberg, and Felix.
 
 ## Stack
 
