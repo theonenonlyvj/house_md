@@ -2,10 +2,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // Keys live in the repo-root .env (two levels up from builds/vj). Never log values.
-let cache: Record<string, string> | null = null;
-
+// No caching: keys added to .env mid-session apply on the next call, no restart.
 export function envKeys(): Record<string, string> {
-  if (cache) return cache;
   const out: Record<string, string> = {};
   try {
     const raw = readFileSync(join(process.cwd(), '..', '..', '.env'), 'utf8');
@@ -16,7 +14,6 @@ export function envKeys(): Record<string, string> {
   } catch {
     // missing .env → keys absent; callers surface visible failure states
   }
-  cache = out;
   return out;
 }
 
