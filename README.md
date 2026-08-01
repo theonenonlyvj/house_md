@@ -24,7 +24,8 @@ cp .env.example .env   # get key values from Vijay — .env never gets committed
 # node >= 20 required
 ```
 
-Read `docs/PLAN.md` (the build plan + scope gates) and `AGENTS.md` (rules for coding
+Read `docs/PLAN-V2.md` (the implementation blueprint), `docs/PRINCIPLES.md` (decision
+guidance), `docs/PLAN.md` (the original scope gates), and `AGENTS.md` (rules for coding
 agents) before writing code. Verified API cheatsheets are in `docs/notes/`.
 
 Synthetic data only — no PHI anywhere in this repo.
