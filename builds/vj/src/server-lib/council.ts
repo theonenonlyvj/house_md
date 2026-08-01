@@ -202,9 +202,13 @@ async function runTool(name: string, args: any): Promise<unknown> {
   const amap = aliasMapOf(chart);
 
   if (name === 'search_patient_evidence') {
-    mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${String(args.query).slice(0, 80)}"`; });
-    const hits = searchEvidence(chart, String(args.query || ''));
-    mutate((s) => { s.activity = `chart search returned ${hits.length} of ${chart.aliases.length} records`; });
+    const q = String(args.query || '');
+    mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${q.slice(0, 80)}"`; });
+    const { mossSearch } = await import('./moss');
+    const mossHits = await mossSearch(chart, q);
+    const hits = mossHits ?? searchEvidence(chart, q);
+    const source = mossHits ? 'Moss semantic search' : 'chart keyword search';
+    mutate((s) => { s.activity = `${source}: ${hits.length} of ${chart.aliases.length} records for "${q.slice(0, 50)}"`; });
     return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
   }
 
@@ -388,6 +392,8 @@ function buildSettings(thinkModel: string) {
 export async function assemble(presentation: string): Promise<void> {
   const chart = await loadChart();
   live.chart = chart;
+  const { kickChartIndex } = await import('./moss');
+  kickChartIndex(chart);
   const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
   const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty);
   mutate((s) => {

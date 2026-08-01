@@ -67,6 +67,10 @@ const DEV_CHART: { patient: any; resources: any[] } = {
 
 let cached: LoadedChart | null = null;
 
+export function resetChartCache(): void {
+  cached = null;
+}
+
 export async function loadChart(force = false): Promise<LoadedChart> {
   if (cached && !force) return cached;
   const cfg = DEFAULT_CASE;

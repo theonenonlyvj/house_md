@@ -101,6 +101,20 @@ function usePushToTalk() {
   return { talking, start, stop };
 }
 
+// Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
+function initials(name?: string): string {
+  if (!name) return '·';
+  const words = name.replace(/\(.*?\)/g, '').split(/[\s,]+/).filter((w) => w && !/^(Dr|Ms|Mr|Mrs|M\.?D)\.?$/i.test(w));
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || name[0].toUpperCase();
+}
+function seatClass(seat: { status: string; personaId?: string }): string {
+  if (seat.status === 'empty') return 'seat empty';
+  if (seat.status === 'human') return 'seat human';
+  if (seat.personaId === 'chair-house') return 'seat chair';
+  if (seat.personaId === 'reimbursement') return 'seat reimb';
+  return 'seat';
+}
+
 function ClaimLine({ a, onCite }: { a: Argument; onCite: (rt: string, id: string) => void }) {
   return (
     <div className="claim">
@@ -165,9 +179,10 @@ export default function Page() {
     <>
       <div className="topstrip">
         <span className="name">house_md</span>
+        <span className="subname">Council of Peers</span>
         {s.patient && (
           <>
-            <span>{s.patient.name} · DOB {s.patient.dob}</span>
+            <span className="patient">{s.patient.name} · DOB {s.patient.dob}</span>
             <span className="badge syn">SYNTHETIC DATA</span>
             <span className="badge">{s.patient.payer}</span>
           </>
@@ -176,11 +191,12 @@ export default function Page() {
         {s.activity && <span className="activity">{s.activity}</span>}
         <span style={{ flex: 1 }} />
         <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 chair audio on' : '🔇 enable chair audio'}</button>
-        <span className="badge">the council argues, the clinician decides</span>
+        <span className="tagline">the council argues, the clinician decides</span>
       </div>
 
       <div className="stage">
         <div className="table-wrap">
+          <div className="table-surface" />
           {seats.map((seat, i) => {
             const angle = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
             const x = 50 + 44 * Math.cos(angle);
@@ -188,10 +204,13 @@ export default function Page() {
             return (
               <div
                 key={`${seat.specialty}-${seat.status}-${i}`}
-                className={`seat ${seat.status}`}
-                style={{ left: `calc(${x}% - 74px)`, top: `calc(${y}% - 30px)` }}
+                className={seatClass(seat)}
+                style={{ left: `calc(${x}% - 79px)`, top: `calc(${y}% - 44px)` }}
                 title={seat.reasons.join(' · ')}
               >
+                <div className="avatar">
+                  {seat.status === 'empty' ? '?' : seat.status === 'human' ? 'YOU' : initials(seat.personaName)}
+                </div>
                 <div className="who">{seat.status === 'empty' ? 'EMPTY SEAT' : seat.personaName}</div>
                 <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
                 <div className="why">{seat.reasons[0]}</div>
@@ -201,7 +220,7 @@ export default function Page() {
 
           <div className="center">
             {s.differential.length === 0 && (
-              <div style={{ color: 'var(--muted)' }}>
+              <div className="placeholder">
                 {s.phase === 'case-ready'
                   ? 'Load the case, then assemble the council.'
                   : 'The council is working — arguments land here with citations.'}
@@ -210,11 +229,11 @@ export default function Page() {
 
             {s.differential.length > 0 && (
               <>
-                <h3>Differential — every claim cited or labeled conjecture</h3>
+                <h3>Differential <span className="sub">every claim cited or labeled conjecture</span></h3>
                 {s.differential.map((d) => (
                   <div key={d.id} className={`dx ${d.status === 'leading' ? 'leading' : ''}`}>
                     <div className="head">
-                      <span className="rank">#{d.rank}</span>
+                      <span className="rank">{d.rank}</span>
                       <span className="title">{d.display}</span>
                       <span style={{ flex: 1 }} />
                       {s.phase !== 'case-ready' && (
@@ -223,7 +242,7 @@ export default function Page() {
                         </button>
                       )}
                     </div>
-                    <div style={{ fontSize: 13 }}>{d.assessment}</div>
+                    <div className="assessment">{d.assessment}</div>
                     {d.supporting.map((a, i) => <ClaimLine key={`s${i}`} a={a} onCite={openCite} />)}
                     {d.contradicting.map((a, i) => (
                       <div key={`c${i}`} className="claim">
@@ -253,14 +272,15 @@ export default function Page() {
 
             {s.workup.length > 0 && (
               <>
-                <h3>Proposed workup — coverage attached where the payer answered</h3>
+                <h3>Proposed workup <span className="sub">coverage attached where the payer answered</span></h3>
                 {s.workup.map((o) => (
                   <div key={o.id} className="opt">
                     <div className="title">{o.display} <span className="badge">{o.priority}</span></div>
-                    <div style={{ fontSize: 13 }}>{o.purpose}</div>
+                    <div className="purpose">{o.purpose}</div>
                     {o.sequenceNote && <div className="seq">⇄ {o.sequenceNote}</div>}
                     {o.benefit && (
                       <div className="ben">
+                        <div className="ben-label">Coverage facts</div>
                         {o.benefit.matched ? (
                           <>
                             plan {o.benefit.planActive ? 'ACTIVE' : 'INACTIVE'}
@@ -268,10 +288,10 @@ export default function Page() {
                             {o.benefit.deductibleRemaining && <> · deductible left <span className="money">{o.benefit.deductibleRemaining}</span></>}
                             {o.benefit.oopRemaining && <> · OOP left <span className="money">{o.benefit.oopRemaining}</span></>}
                             {o.benefit.messages.map((m, i) => <div key={i}>payer: “{m}”</div>)}
-                            <div>(reported by payer test response — estimate, not a guarantee)</div>
+                            <div className="caveat">(reported by payer test response — estimate, not a guarantee)</div>
                           </>
                         ) : (
-                          <>no service-specific benefit information returned</>
+                          <span className="caveat">no service-specific benefit information returned</span>
                         )}
                       </div>
                     )}
@@ -295,6 +315,7 @@ export default function Page() {
 
         <div className="rail">
           <div className="controls">
+            <div className="rail-label">Chair’s bench</div>
             <div className="row">
               <button className="primary" disabled={!canAssemble} onClick={() => post('/api/session/assemble')}>
                 🩺 Assemble council
@@ -308,7 +329,8 @@ export default function Page() {
               onPointerUp={ptt.stop}
               onPointerLeave={ptt.stop}
             >
-              {ptt.talking ? '🎙 LISTENING — release when done' : '🎙 HOLD to speak to the council'}
+              {ptt.talking ? '🎙 LISTENING' : '🎙 HOLD to speak to the council'}
+              <span className="hint">{ptt.talking ? 'release when done' : 'press and hold — you are at the table'}</span>
             </button>
             <div className="row">
               <input
@@ -338,13 +360,17 @@ export default function Page() {
                 <button onClick={() => post('/api/session/assemble')}>retry</button>
               </div>
             )}
+            <div className="guide">
+              <b>1</b> Assemble · <b>2</b> Council argues — listen · <b>3</b> Hold to speak (or type) ·{' '}
+              <b>4</b> Select the leading dx · <b>5</b> Review coverage · <b>6</b> Finalize
+            </div>
           </div>
 
           <div className="transcript" ref={transcriptRef}>
             {s.transcript.map((t, i) => (
               <div key={i} className={`turn ${t.role}`}>
                 <div className="who">{t.role === 'chair' ? 'House, M.D. (chair)' : t.role}</div>
-                <div>{t.text}</div>
+                <div className="said">{t.text}</div>
               </div>
             ))}
           </div>
