@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { AgentMicrophone, AgentPlayer, AgentSession, type FunctionCallRequestMessage } from '@deepgram/agents';
+import { AGENT_SETTINGS } from '@/client/voice-agent';
 import type { Claim, CreatedResource, EvidenceItem, IntegrationName, Seat, SessionState, WorkupItem } from '@/domain/types';
 
 const SESSION_ID = 'demo-session';
@@ -13,10 +15,9 @@ export default function LivingDifferentialPage() {
   const [caption, setCaption] = useState('Connect the managed voice agent to present the case.');
   const [drawer, setDrawer] = useState<{ title: string; value: unknown } | null>(null);
   const [activePersona, setActivePersona] = useState('');
-  const socketRef = useRef<WebSocket | null>(null);
-  const captureRef = useRef<{ context: AudioContext; stream: MediaStream; node: AudioWorkletNode } | null>(null);
-  const playbackRef = useRef<{ context: AudioContext; cursor: number }>({ context: null as unknown as AudioContext, cursor: 0 });
-  const listeningRef = useRef(false);
+  const sessionRef = useRef<AgentSession | null>(null);
+  const microphoneRef = useRef<AgentMicrophone | null>(null);
+  const playerRef = useRef<AgentPlayer | null>(null);
   const specialistQueueRef = useRef<Array<{ personaId: string; text: string }>>([]);
   const specialistAudioRef = useRef<HTMLAudioElement | null>(null);
 
@@ -30,7 +31,11 @@ export default function LivingDifferentialPage() {
   }, []);
 
   useEffect(() => { refresh().catch((reason) => setError(reason.message)); }, [refresh]);
-  useEffect(() => () => { socketRef.current?.close(); stopCapture(captureRef); }, []);
+  useEffect(() => () => {
+    microphoneRef.current?.stop();
+    sessionRef.current?.disconnect();
+    playerRef.current?.dispose();
+  }, []);
 
   const api = useCallback(async (path: string, body: object) => {
     setBusy(path);
@@ -77,62 +82,136 @@ export default function LivingDifferentialPage() {
     setVoice('ready');
   }, []);
 
-  const connectVoice = useCallback(() => {
-    socketRef.current?.close();
-    setVoice('connecting');
-    setCaption('Opening the managed Deepgram room…');
-    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const socket = new WebSocket(`${protocol}//${location.host}/agent`);
-    socket.binaryType = 'arraybuffer';
-    socketRef.current = socket;
-    socket.onopen = () => socket.send(JSON.stringify({ type: 'start', sessionId: SESSION_ID }));
-    socket.onmessage = async (message) => {
-      if (message.data instanceof ArrayBuffer) { playPcm(message.data, playbackRef); setVoice('speaking'); return; }
-      const payload = JSON.parse(String(message.data));
-      if (payload.type === 'status') {
-        if (payload.state === 'ready') { setVoice('ready'); setCaption('Room connected. Hold to present the case.'); }
-        else if (payload.state === 'connecting') setVoice('connecting');
-        else if (payload.state === 'error') { setVoice('error'); setError(payload.detail); }
+  const handleFunctionCalls = useCallback(async (message: FunctionCallRequestMessage, session: AgentSession) => {
+    for (const call of message.functions ?? []) {
+      let args: Record<string, unknown> = {};
+      try {
+        const candidate = (call as { arguments?: string; input?: unknown }).arguments ?? (call as { input?: unknown }).input;
+        const raw = typeof candidate === 'string' ? candidate : JSON.stringify(candidate ?? {});
+        args = JSON.parse(raw || '{}') as Record<string, unknown>;
+      } catch {
+        session.sendFunctionCallResponse(call.id, call.name, JSON.stringify({ error: 'Tool arguments were not valid JSON.' }));
+        continue;
       }
-      if (payload.type === 'function') {
-        const next = await refresh();
-        if (payload.name === 'update_differential') specialistQueueRef.current = next.contributions.slice(0, 2).map((item) => ({ personaId: item.personaId, text: item.leadingInterpretation.text }));
-      }
-      if (payload.type === 'dg') {
-        const event = payload.event;
-        if (event.type === 'ConversationText') {
-          const text = event.content ?? event.text ?? '';
-          if (text) setCaption(text);
-          if (event.role === 'user' && text) setState((current) => current ? { ...current, transcript: text } : current);
+
+      try {
+        const evidenceSearch = call.name === 'search_patient_evidence';
+        const response = await fetch(evidenceSearch ? '/api/session/evidence' : '/api/agent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(evidenceSearch
+            ? { id: SESSION_ID, query: args.query }
+            : { id: SESSION_ID, action: call.name, payload: args }),
+        });
+        const value = await response.json() as SessionState & { error?: string };
+        if (!response.ok) throw new Error(value.error || `${call.name} failed`);
+        setState(value);
+        const result = evidenceSearch
+          ? {
+              query: value.evidenceSearch?.query,
+              scanned: value.evidenceSearch?.scanned,
+              hits: value.evidence.map(({ alias, resourceType, title, summary, date }) => ({ alias, resourceType, title, summary, date })),
+            }
+          : value;
+        session.sendFunctionCallResponse(call.id, call.name, JSON.stringify(result));
+        if (call.name === 'update_differential') {
+          specialistQueueRef.current = value.contributions.slice(0, 2).map((item) => ({ personaId: item.personaId, text: item.leadingInterpretation.text }));
         }
-        if (event.type === 'UserStartedSpeaking') { flushPlayback(playbackRef); flushSpecialists(); setVoice('listening'); }
-        if (event.type === 'AgentStartedSpeaking') setVoice('speaking');
-        if (event.type === 'AgentAudioDone') { if (specialistQueueRef.current.length) void playSpecialists(); else setVoice('ready'); }
-        if (event.type === 'Error') { setVoice('error'); setError(event.description ?? event.message ?? 'Deepgram agent error'); }
+      } catch (reason) {
+        const message = reason instanceof Error ? reason.message : String(reason);
+        setError(message);
+        session.sendFunctionCallResponse(call.id, call.name, JSON.stringify({ error: message }));
       }
-    };
-    socket.onerror = () => { setVoice('error'); setError('The Deepgram relay could not connect.'); };
-    socket.onclose = () => setVoice((current) => current === 'error' ? current : 'offline');
-  }, [flushSpecialists, playSpecialists, refresh]);
+    }
+  }, []);
+
+  const connectVoice = useCallback(async () => {
+    microphoneRef.current?.stop();
+    microphoneRef.current = null;
+    sessionRef.current?.disconnect();
+    playerRef.current?.dispose();
+    setVoice('connecting');
+    setError('');
+    setCaption('Opening a direct Deepgram voice session…');
+
+    const player = new AgentPlayer({ sampleRate: 24_000 });
+    const session = new AgentSession({
+      auth: {
+        tokenFactory: async () => {
+          const response = await fetch('/api/deepgram-token', { cache: 'no-store' });
+          if (!response.ok) {
+            const value = await response.json().catch(() => ({ error: 'Unable to get a Deepgram access token.' })) as { error?: string };
+            throw new Error(value.error || 'Unable to get a Deepgram access token.');
+          }
+          return response.text();
+        },
+      },
+      agent: AGENT_SETTINGS,
+      audio: { input: { encoding: 'linear16', sampleRate: 24_000 }, output: { encoding: 'linear16', sampleRate: 24_000 } },
+      keepAliveInterval: 8_000,
+      reconnect: { enabled: true, maxAttempts: 4 },
+    });
+    playerRef.current = player;
+    sessionRef.current = session;
+
+    session.on('settings-applied', () => { setVoice('ready'); setCaption('Room connected. Hold to present the case.'); });
+    session.on('audio', (chunk) => { player.queue(chunk); setVoice('speaking'); });
+    session.on('conversation-text', (message) => {
+      const text = message.content ?? '';
+      if (text) setCaption(text);
+      if (message.role === 'user' && text) setState((current) => current ? { ...current, transcript: text } : current);
+    });
+    session.on('user-started-speaking', () => { player.interrupt(); flushSpecialists(); setVoice('listening'); });
+    session.on('agent-started-speaking', () => setVoice('speaking'));
+    session.on('agent-audio-done', () => {
+      const playbackDelay = Math.ceil(player.getRemainingPlaybackTime() * 1_000);
+      window.setTimeout(() => {
+        if (sessionRef.current !== session) return;
+        if (specialistQueueRef.current.length) void playSpecialists();
+        else setVoice('ready');
+      }, playbackDelay);
+    });
+    session.on('function-call-request', (message) => void handleFunctionCalls(message, session));
+    session.on('error', (message) => {
+      setVoice('error');
+      setError(('description' in message && message.description) || 'Deepgram agent error');
+    });
+    session.on('sdk-error', (reason) => { setVoice('error'); setError(reason.message); });
+    session.on('reconnecting', () => { setVoice('connecting'); setCaption('Reconnecting directly to Deepgram…'); });
+    session.on('disconnected', () => setVoice((current) => current === 'error' ? current : 'offline'));
+
+    try {
+      await session.connect();
+    } catch (reason) {
+      setVoice('error');
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  }, [flushSpecialists, handleFunctionCalls, playSpecialists]);
 
   const beginTalk = useCallback(async (event: ReactPointerEvent<HTMLButtonElement>) => {
     event.currentTarget.setPointerCapture(event.pointerId);
     if (voice !== 'ready' && voice !== 'listening') return;
     try {
-      if (!captureRef.current) captureRef.current = await createCapture((pcm) => { if (listeningRef.current && socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(pcm); });
-      listeningRef.current = true;
-      flushPlayback(playbackRef);
+      const session = sessionRef.current;
+      if (!session) throw new Error('Connect the Deepgram room first.');
+      if (!microphoneRef.current) {
+        microphoneRef.current = new AgentMicrophone((pcm) => session.sendAudio(pcm), { sampleRate: 24_000 });
+        await microphoneRef.current.start();
+      } else {
+        microphoneRef.current.unmute();
+      }
+      playerRef.current?.interrupt();
       flushSpecialists();
       setVoice('listening');
       setCaption('Listening… release when finished.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   }, [flushSpecialists, voice]);
 
-  const endTalk = useCallback(() => { listeningRef.current = false; setVoice('ready'); setCaption('Processing the clinician’s presentation…'); }, []);
+  const endTalk = useCallback(() => { microphoneRef.current?.mute(); setVoice('ready'); setCaption('Processing the clinician’s presentation…'); }, []);
 
   const feedPrerecorded = useCallback(async () => {
-    const socket = socketRef.current;
-    if (!socket || socket.readyState !== WebSocket.OPEN || voice !== 'ready') { setError('Connect the Deepgram room before sending prerecorded audio.'); return; }
+    const session = sessionRef.current;
+    if (!session || voice !== 'ready') { setError('Connect the Deepgram room before sending prerecorded audio.'); return; }
     setBusy('prerecorded');
     setVoice('listening');
     setCaption('Streaming clinically reviewed audio in real time…');
@@ -142,11 +221,12 @@ export default function LivingDifferentialPage() {
       const pcm = await decodeToPcm24k(await response.arrayBuffer());
       const frame = 960;
       for (let offset = 0; offset < pcm.length; offset += frame) {
-        socket.send(pcm.slice(offset, Math.min(offset + frame, pcm.length)).buffer);
+        const chunk = pcm.slice(offset, Math.min(offset + frame, pcm.length));
+        session.sendAudio(chunk.buffer as ArrayBuffer);
         await delay(40);
       }
       const silence = new Int16Array(frame);
-      for (let index = 0; index < 38; index += 1) { socket.send(silence.buffer); await delay(40); }
+      for (let index = 0; index < 38; index += 1) { session.sendAudio(silence.buffer as ArrayBuffer); await delay(40); }
       setCaption('Audio delivered through Deepgram. Waiting for the live transcript…');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(''); setVoice('ready'); }
@@ -157,17 +237,17 @@ export default function LivingDifferentialPage() {
     if (!transcript) { setError('Present the case through Deepgram first; no stored transcript will be substituted.'); return; }
     const next = await api('/api/session/assemble', { presentation: transcript });
     const empty = next.seats.filter((seat) => seat.kind === 'empty').map((seat) => seat.specialty).join(', ');
-    socketRef.current?.send(JSON.stringify({ type: 'inject', content: `The clinician clicked Assemble council. Begin the evidence search and council debate now.${empty ? ` Explicitly call out the empty ${empty} seat.` : ''}` }));
+    sessionRef.current?.injectUserMessage(`The clinician clicked Assemble council. Begin the evidence search and council debate now.${empty ? ` Explicitly call out the empty ${empty} seat.` : ''}`);
   }, [api, state?.transcript]);
 
   const selectDx = useCallback(async (id: string) => {
     await api('/api/session/selection', { type: 'hypothesis', itemId: id });
-    socketRef.current?.send(JSON.stringify({ type: 'inject', content: 'The clinician selected the leading hypothesis and is ready to discuss a discriminating workup. Call propose_workup now.' }));
+    sessionRef.current?.injectUserMessage('The clinician selected the leading hypothesis and is ready to discuss a discriminating workup. Call propose_workup now.');
   }, [api]);
 
   const checkCoverage = useCallback(async () => {
     const next = await api('/api/session/coverage', {});
-    if (next.coverage) socketRef.current?.send(JSON.stringify({ type: 'inject', content: `The live Stedi response is now on the board. State only these returned facts: ${next.coverage.message ?? 'no referral message'}; specialist copay ${next.coverage.specialistCopay == null ? 'not returned' : `$${next.coverage.specialistCopay}`}; remaining individual deductible ${next.coverage.deductibleRemaining == null ? 'not returned' : `$${next.coverage.deductibleRemaining}`}; remaining individual out-of-pocket ${next.coverage.oopRemaining == null ? 'not returned' : `$${next.coverage.oopRemaining}`}. Explain the visible sequencing change without calling coverage a guarantee.` }));
+    if (next.coverage) sessionRef.current?.injectUserMessage(`The live Stedi response is now on the board. State only these returned facts: ${next.coverage.message ?? 'no referral message'}; specialist copay ${next.coverage.specialistCopay == null ? 'not returned' : `$${next.coverage.specialistCopay}`}; remaining individual deductible ${next.coverage.deductibleRemaining == null ? 'not returned' : `$${next.coverage.deductibleRemaining}`}; remaining individual out-of-pocket ${next.coverage.oopRemaining == null ? 'not returned' : `$${next.coverage.oopRemaining}`}. Explain the visible sequencing change without calling coverage a guarantee.`);
   }, [api]);
 
   if (!state) return <main className="loading-shell" aria-busy="true"><div className="loading-line" /><p>Loading the synthetic patient record from Medplum…</p></main>;
@@ -280,36 +360,6 @@ function JsonDrawer({ title, value, close }: { title: string; value: unknown; cl
   return <div className="drawer-backdrop" role="presentation" onMouseDown={close}><aside className="json-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="drawer-title">{title}</h2><p>FHIR R4 resource from the current session</p></div><button onClick={close} aria-label="Close raw JSON">Close</button></header><pre>{JSON.stringify(value, null, 2)}</pre></aside></div>;
 }
 
-async function createCapture(onPcm: (buffer: ArrayBuffer) => void) {
-  const context = new AudioContext({ sampleRate: 24_000 });
-  await context.audioWorklet.addModule('/worklet.js');
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
-  const source = context.createMediaStreamSource(stream);
-  const node = new AudioWorkletNode(context, 'pcm-capture');
-  node.port.onmessage = (event) => onPcm(event.data);
-  source.connect(node);
-  node.connect(context.destination);
-  return { context, stream, node };
-}
-
-function stopCapture(ref: { current: { context: AudioContext; stream: MediaStream; node: AudioWorkletNode } | null }) { const capture = ref.current; if (!capture) return; capture.stream.getTracks().forEach((track) => track.stop()); capture.node.disconnect(); capture.context.close(); ref.current = null; }
-
-function playPcm(array: ArrayBuffer, ref: { current: { context: AudioContext; cursor: number } }) {
-  if (!ref.current.context) ref.current = { context: new AudioContext({ sampleRate: 24_000 }), cursor: 0 };
-  const { context } = ref.current;
-  const pcm = new Int16Array(array);
-  const buffer = context.createBuffer(1, pcm.length, 24_000);
-  const channel = buffer.getChannelData(0);
-  for (let index = 0; index < pcm.length; index += 1) channel[index] = pcm[index] / 0x8000;
-  const source = context.createBufferSource();
-  source.buffer = buffer;
-  source.connect(context.destination);
-  const start = Math.max(context.currentTime, ref.current.cursor);
-  source.start(start);
-  ref.current.cursor = start + buffer.duration;
-}
-
-function flushPlayback(ref: { current: { context: AudioContext; cursor: number } }) { if (ref.current.context) { ref.current.context.close(); ref.current = { context: null as unknown as AudioContext, cursor: 0 }; } }
 async function decodeToPcm24k(data: ArrayBuffer) { const sourceContext = new AudioContext(); const decoded = await sourceContext.decodeAudioData(data.slice(0)); const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 24_000), 24_000); const source = offline.createBufferSource(); source.buffer = decoded; source.connect(offline.destination); source.start(); const rendered = await offline.startRendering(); await sourceContext.close(); const floats = rendered.getChannelData(0); const pcm = new Int16Array(floats.length); for (let index = 0; index < floats.length; index += 1) pcm[index] = Math.max(-1, Math.min(1, floats[index])) * 0x7fff; return pcm; }
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const initials = (name: string) => name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
