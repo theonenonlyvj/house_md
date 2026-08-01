@@ -275,8 +275,8 @@ async function runTool(name: string, args: any): Promise<unknown> {
   }
 
   if (name === 'submit_council_output') {
-    if (!Array.isArray(args.differential) || args.differential.length === 0) {
-      return { error: 'differential is REQUIRED and non-empty — present all specialist turns first, then submit the ranked differential.' };
+    if (!Array.isArray(args.differential) || args.differential.length < 2) {
+      return { error: 'differential must be a RANKED LIST of 2-4 items (leading + the alternatives being excluded, each with evidence aliases) — resubmit the full ranked differential.' };
     }
     const contributions: SpecialistContribution[] = (args.contributions || []).map((c: any) => ({
       personaId: String(c.personaId || ''),
