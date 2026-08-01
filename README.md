@@ -17,6 +17,14 @@ Vijay Ram, Thai Nguyen, Noah Landesberg, and Felix Wotschofsky.
 (voice) · [Stedi](https://www.stedi.com/) (test-mode eligibility) ·
 [Moss](https://moss.dev) (real-time retrieval) · TypeScript
 
+## Build status
+
+The repository currently contains a verified standalone Stedi test-mode POC and the
+implementation blueprint for the complete application. Deepgram, Medplum, Moss, the
+reasoning runtime, and the main clinician workspace are specified but are not yet
+integrated application code. See the implementation-truth table in `docs/PLAN.md`; do
+not infer completion from the presence of design documentation.
+
 ## Getting started
 
 ```bash
@@ -24,8 +32,9 @@ cp .env.example .env   # get key values from Vijay — .env never gets committed
 # node >= 20 required
 ```
 
-Read `docs/PLAN-V2.md` (the implementation blueprint), `docs/PRINCIPLES.md` (decision
-guidance), `docs/PLAN.md` (the original scope gates), and `AGENTS.md` (rules for coding
-agents) before writing code. Verified API cheatsheets are in `docs/notes/`.
+Read `docs/PLAN.md` (the canonical implementation blueprint), `docs/PRINCIPLES.md`
+(product and decision guidance), `docs/DEMO.md` (the separate two-minute video
+constraint), and `AGENTS.md` (rules for coding agents) before writing code. Verified
+API cheatsheets are in `docs/notes/`.
 
 Synthetic data only — no PHI anywhere in this repo.
