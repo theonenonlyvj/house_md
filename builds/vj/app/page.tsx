@@ -65,6 +65,42 @@ function useChairAudio(enabled: boolean) {
   }, [enabled]);
 }
 
+// Push-to-talk: hold → mic PCM (24k linear16 via worklet) → /ws/voice → the live
+// council session's listen leg (nova-3). Release to stop. You are at the table.
+function usePushToTalk() {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream }>({});
+  const [talking, setTalking] = useState(false);
+  const start = useCallback(async () => {
+    if (ref.current.ws) return;
+    try {
+      const ws = new WebSocket(`ws://${location.host}/ws/voice`);
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      const ctx = new AudioContext({ sampleRate: 24000 });
+      await ctx.audioWorklet.addModule('/pcm-worklet.js');
+      const src = ctx.createMediaStreamSource(stream);
+      const node = new AudioWorkletNode(ctx, 'pcm-capture');
+      node.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+      src.connect(node);
+      ref.current = { ws, ctx, stream };
+      setTalking(true);
+    } catch {
+      setTalking(false);
+    }
+  }, []);
+  const stop = useCallback(() => {
+    const { ws, ctx, stream } = ref.current;
+    stream?.getTracks().forEach((t) => t.stop());
+    void ctx?.close();
+    setTimeout(() => ws?.close(), 400);
+    ref.current = {};
+    setTalking(false);
+  }, []);
+  return { talking, start, stop };
+}
+
 function ClaimLine({ a, onCite }: { a: Argument; onCite: (rt: string, id: string) => void }) {
   return (
     <div className="claim">
@@ -90,6 +126,7 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   useChairAudio(audioOn);
+  const ptt = usePushToTalk();
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -264,10 +301,19 @@ export default function Page() {
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
             </div>
+            <button
+              className={`primary ptt ${ptt.talking ? 'talking' : ''}`}
+              disabled={s.phase === 'case-ready'}
+              onPointerDown={ptt.start}
+              onPointerUp={ptt.stop}
+              onPointerLeave={ptt.stop}
+            >
+              {ptt.talking ? '🎙 LISTENING — release when done' : '🎙 HOLD to speak to the council'}
+            </button>
             <div className="row">
               <input
                 type="text"
-                placeholder="Interject — you're at the table (push-to-talk = type here)"
+                placeholder="…or type your interjection"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {

@@ -522,6 +522,8 @@ export function selectHypothesis(id: string): void {
 export function sendMicAudio(buf: Buffer): void {
   if (live.ws && live.ready && live.ws.readyState === WebSocket.OPEN) live.ws.send(buf);
 }
+// Bridge for the plain-JS ws relay in server.js (same process, different module graph).
+g.__housemd_mic = sendMicAudio;
 
 export function getPatientPlanText(): string {
   if (live.patientPlanText) return live.patientPlanText;
