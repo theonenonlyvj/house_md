@@ -27,12 +27,10 @@ of the only teams with three sponsors load-bearing (four if Moss retrieval lands
 Demo mode = click-advanced stepper, zero autoplay, presenter script visible. Live-mic
 beat only if the voice upgrade is solid by 4pm.
 
-## Role split
+## Work split
 
-- **Vijay** — agent core + FHIR wiring + repo/infra.
-- **Thai** — case selection (pick ONE great teaching case), whiteboard UX, demo script.
-- **Noah** — Stedi/coverage leg + PHI/compliance framing ("everything you see is
-  synthetic" — say it in the demo; it lands as competence with this panel).
+Team divides lanes in the room. Suggested lanes to cover: agent core + FHIR wiring ·
+case selection + whiteboard UX + demo script · coverage/Stedi leg · voice pipeline.
 
 ## Judge-proofing
 
