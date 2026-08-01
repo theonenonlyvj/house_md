@@ -3,8 +3,8 @@
 One-day hackathon build (YC × Medplum Agentic Healthcare Hackathon, Sat 2026-08-01,
 **submit 5:00pm PT**). Team: Vijay, Thai, Noah, Felix. Canonical build source:
 **`docs/PLAN-FINAL.md`** (self-contained; agreed by Vijay + Felix ~1:17pm). Decision
-guidance: `docs/PRINCIPLES.md`. History (do not build from): `docs/PLAN.md`,
-`docs/PLAN-V2.md`, `docs/INFRA-PROPOSAL.md`, `docs/DECISIONS.md`. Video constraint:
+guidance: `docs/PRINCIPLES.md`. Superseded plans (do not build from): `docs/history/`.
+Video constraint:
 `docs/DEMO.md`. Provider notes: `docs/notes/`. This file applies to every
 coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
 

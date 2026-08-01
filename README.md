@@ -19,11 +19,10 @@ Vijay Ram, Thai Nguyen, Noah Landesberg, and Felix Wotschofsky.
 
 ## Build status
 
-The repository currently contains a verified standalone Stedi test-mode POC and the
-implementation blueprint for the complete application. Deepgram, Medplum, Moss, the
-reasoning runtime, and the main clinician workspace are specified but are not yet
-integrated application code. See the integration-truth table in `docs/PLAN-V2.md`; do
-not infer completion from the presence of design documentation.
+The repository contains verified standalone PoCs (`stedi-poc/` eligibility, `voice-poc/`
+Deepgram agent + Moss retrieval) and the canonical plan for the application now being
+built in `app/`. See the integration-truth table in `docs/PLAN-FINAL.md`; do not infer
+completion from the presence of design documentation.
 
 ## Getting started
 
@@ -32,9 +31,9 @@ cp .env.example .env   # get key values from Vijay — .env never gets committed
 # node >= 20 required
 ```
 
-Read `docs/PLAN-V2.md` (the canonical product outcome), `docs/PRINCIPLES.md` (product
-and decision guidance), `docs/DEMO.md` (the separate two-minute video constraint), and
-`AGENTS.md` (rules for coding agents) before writing code. `docs/PLAN.md` preserves the
-original plan. Verified API cheatsheets are in `docs/notes/`.
+Read `docs/PLAN-FINAL.md` (the canonical, self-contained plan), `docs/PRINCIPLES.md`
+(decision guidance), `docs/DEMO.md` (the two-minute video constraint), and `AGENTS.md`
+(rules for coding agents) before writing code. Superseded plans live in
+`docs/history/`. Verified API cheatsheets are in `docs/notes/`.
 
 Synthetic data only — no PHI anywhere in this repo.
