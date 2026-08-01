@@ -16,8 +16,10 @@ The finished demo must show one uninterrupted loop:
 
 1. Select a synthetic patient and load their longitudinal FHIR record from Medplum.
 2. Accept a clinician's spoken case presentation through Deepgram.
-3. Retrieve relevant patient evidence through Moss.
-4. Display a ranked differential with supporting and contradicting evidence.
+3. Deterministically seat a chair and case-relevant specialist council, visibly
+   flagging any required specialty that cannot be seated.
+4. Retrieve relevant patient evidence through Moss and have the specialists argue a
+   ranked differential with supporting and contradicting evidence.
 5. Let the clinician challenge, reorder, and select a leading hypothesis.
 6. Generate proposed workup options.
 7. Run one Stedi test-mode eligibility check and display the returned benefits.
@@ -354,6 +356,30 @@ for selection, one restrained `aria-live` region, non-color direction cues, and
 projector-readable WCAG AA text. The semantic experience must remain usable if the
 canvas renderer is unavailable.
 
+### 3.7 Council composition and debate
+
+The clinical reasoning experience is explicitly plural: a moderator/chair and a small
+set of case-relevant specialist personas argue the differential against one another.
+Each persona has a specialty, argument style, system prompt, and optional Deepgram Aura
+voice. The chair synthesizes the ranked differential.
+
+Council composition is a deterministic, non-LLM guardrail. A pure seating function
+maps case features—chief complaint, organ systems, medications, age, and sex—to
+required specialties and available personas. The UI must show who was seated and why.
+If a required specialist is unavailable, render an explicit empty seat and have the
+chair flag the missing expertise instead of letting another persona improvise it.
+
+Every specialist argument contains a hypothesis, evidence for it, challenges to other
+hypotheses, and a confidence direction. Every patient-specific evidence item carries a
+Medplum resource ID. The chair demotes uncited patient claims to conjecture in code,
+not through prompt instructions alone.
+
+The council runtime may use any available LLM behind one thin provider seam. Prompt and
+model selection belong to the voice/reasoning workstream, but seating, citation
+validation, clinician permissions, and canonical state transitions remain deterministic
+application logic. Development fixtures may exercise the council UI and reducers; the
+submitted flow must generate the visible debate from current input and evidence.
+
 ## 4. System architecture
 
 ```text
@@ -365,7 +391,7 @@ Voice runtime (Deepgram)
     v
 Session coordinator <----------------------------+
     |                                             |
-    +--> Reasoning agent                          |
+    +--> Council reasoning runtime                |
     |       |                                     |
     |       +--> Moss evidence search ------------+
     |       +--> Medplum FHIR reads --------------+
@@ -388,7 +414,8 @@ src/
   cases/                  synthetic patient definitions and validation assertions
   domain/                 canonical types and state transitions
   canvas/                 pure projection, layout, shapes, bindings, transitions
-  agent/                  tool registry and reasoning-session adapter
+  council/                seating, personas, debate, chair, LLM provider seam
+  agent/                  tool registry and session adapter
   integrations/
     deepgram/             voice runtime adapter
     medplum/              FHIR repository and write-back
@@ -423,6 +450,25 @@ type CaseAssertions = {
   expectedEvidenceResourceIds: string[];
   acceptableLeadingHypotheses: string[];
   expectedWorkupConcepts: string[];
+};
+
+type CouncilSeat = {
+  id: string;
+  specialty: string;
+  personaId?: string;
+  reason: string;
+  status: "seated" | "empty";
+};
+
+type CouncilArgument = {
+  id: string;
+  seatId: string;
+  hypothesisId: string;
+  assessment: string;
+  supportingEvidence: EvidenceRef[];
+  challenges: { hypothesisId: string; evidence: EvidenceRef[] }[];
+  confidenceDirection: "up" | "down" | "unchanged";
+  provenance: "grounded" | "conjecture";
 };
 
 type EvidenceRef = {
@@ -534,9 +580,9 @@ Acceptance contract:
 - prerecorded audio passes through Deepgram and the same downstream application flow;
 - a microphone failure can switch to prerecorded audio without reloading the case.
 
-### 6.2 Reasoning agent
+### 6.2 Council reasoning runtime
 
-The reasoning agent receives:
+The council reasoning runtime receives:
 
 - the clinician's finalized turn;
 - the current differential and workup state;
@@ -545,6 +591,9 @@ The reasoning agent receives:
 - previous tool results relevant to the active turn.
 
 It may only make patient-specific evidence claims using returned `EvidenceRef` values.
+Before model calls, deterministic seating produces the visible `CouncilSeat[]`. After
+model calls, the chair validates citations and converts unsupported patient claims to
+general conjecture. Models cannot override missing-seat warnings or clinician controls.
 It may propose state changes but may not write FHIR resources without explicit clinician
 confirmation.
 
@@ -764,6 +813,9 @@ The build is demo-ready only when all of the following pass on the presentation 
 ### Conversation and reasoning
 
 - [ ] A clinician utterance appears in the transcript.
+- [ ] Deterministic seating shows every specialist and why they were selected.
+- [ ] A required but unavailable specialty appears as a visible empty seat.
+- [ ] The chair labels unsupported patient-specific claims as conjecture.
 - [ ] The reasoning layer requests patient evidence.
 - [ ] Moss results update the differential.
 - [ ] Supporting and contradicting citations render correctly.
@@ -799,21 +851,23 @@ The build is demo-ready only when all of the following pass on the presentation 
 Build in this order:
 
 1. Scaffold the React/TypeScript application and canonical session reducer.
-2. Add the fixed logical Konva stage and semantic HTML shell.
-3. Implement pure canvas projection, deterministic layout, and the differential scene
+2. Implement and unit-test deterministic council seating, including visible empty-seat
+   output, then define the persona configuration and LLM provider seam.
+3. Add the fixed logical Konva stage and semantic HTML shell.
+4. Implement pure canvas projection, deterministic layout, and the differential scene
    against explicit development fixtures.
-4. Add clinician hypothesis selection, workup, benefits, confirmation, and FHIR-result
+5. Add clinician hypothesis selection, workup, benefits, confirmation, and FHIR-result
    projections; verify canonical state before canvas output.
-5. Seed and read the selected synthetic FHIR record from Medplum.
-6. Normalize and index the patient evidence in Moss; connect live results to the
+6. Seed and read the selected synthetic FHIR record from Medplum.
+7. Normalize and index the patient evidence in Moss; connect live results to the
    differential.
-7. Lift the Stedi adapter and response projection from `stedi-poc/`.
-8. Implement clinician confirmation and idempotent FHIR write-back.
-9. Complete the text-first reasoning tool loop.
-10. Connect Deepgram through the same session coordinator, then add prerecorded voice
+8. Lift the Stedi adapter and response projection from `stedi-poc/`.
+9. Implement clinician confirmation and idempotent FHIR write-back.
+10. Complete the text-first council debate and chair-synthesis loop.
+11. Connect Deepgram through the same session coordinator, then add prerecorded voice
     input without replacing downstream live calls.
-11. Prove that altered speech and altered patient evidence change the generated output.
-12. Run the full acceptance checklist, then stop building and produce the separate
+12. Prove that altered speech and altered patient evidence change the generated output.
+13. Run the full acceptance checklist, then stop building and produce the separate
     two-minute demo artifact.
 
 The integration dependency chain is:
@@ -847,8 +901,9 @@ turn handling, tool-call transport, and voice fallback events.
 
 ### Agent and retrieval
 
-Owns reasoning tool schemas, result validation, FHIR normalization, Moss indexing,
-evidence search, and differential/workup state projections.
+Owns deterministic council seating, persona configuration, the LLM provider seam,
+reasoning tool schemas, citation validation, chair synthesis, FHIR normalization, Moss
+indexing, evidence search, and differential/workup state projections.
 
 ### Coverage
 
