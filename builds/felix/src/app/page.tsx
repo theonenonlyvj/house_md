@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { AgentMicrophone, AgentPlayer, AgentSession, type FunctionCallRequestMessage } from '@deepgram/agents';
 import Image from 'next/image';
+import { readJsonResponse } from '@/client/api-response';
 import { AGENT_SETTINGS } from '@/client/voice-agent';
 import { isSessionState, specialistLinesFor, type SpecialistLine } from '@/client/voice-functions';
 import type { Claim, CreatedResource, EvidenceItem, IntegrationName, Seat, SessionState, WorkupItem } from '@/domain/types';
@@ -36,7 +37,7 @@ export default function LivingDifferentialPage() {
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/session?id=${SESSION_ID}`, { cache: 'no-store' });
-    const value = await response.json() as unknown;
+    const value = await readJsonResponse(response, 'Session API failed');
     const responseError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
     if (!response.ok) throw new Error(responseError || 'Unable to load session');
     if (!isSessionState(value)) throw new Error('Session API returned an invalid state payload.');
@@ -58,7 +59,7 @@ export default function LivingDifferentialPage() {
     setError('');
     try {
       const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: SESSION_ID, ...body }) });
-      const value = await response.json() as unknown;
+      const value = await readJsonResponse(response, `${path} failed`);
       const responseError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
       if (!response.ok) throw new Error(responseError || 'Request failed');
       if (!isSessionState(value)) throw new Error(`${path} returned an invalid session state.`);
@@ -101,7 +102,7 @@ export default function LivingDifferentialPage() {
         setCaption(`${line.speaker}: ${line.text}`);
         const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(line) });
         if (!response.ok) {
-          const value = await response.json().catch(() => ({ error: 'Specialist voice failed.' })) as { error?: string };
+          const value = await readJsonResponse(response, 'Specialist voice failed') as { error?: string };
           throw new Error(value.error ?? 'Specialist voice failed.');
         }
         const pcm = await response.arrayBuffer();
@@ -148,7 +149,7 @@ export default function LivingDifferentialPage() {
             ? { id: SESSION_ID, query: args.query }
             : { id: SESSION_ID, action: call.name, payload: args }),
         });
-        const value = await response.json() as unknown;
+        const value = await readJsonResponse(response, `${call.name} failed`);
         const apiError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
         if (!response.ok) throw new Error(apiError || `${call.name} failed`);
         let result = value;
@@ -196,7 +197,7 @@ export default function LivingDifferentialPage() {
         tokenFactory: async () => {
           const response = await fetch('/api/deepgram-token', { cache: 'no-store' });
           if (!response.ok) {
-            const value = await response.json().catch(() => ({ error: 'Unable to get a Deepgram access token.' })) as { error?: string };
+            const value = await readJsonResponse(response, 'Unable to get a Deepgram access token') as { error?: string };
             throw new Error(value.error || 'Unable to get a Deepgram access token.');
           }
           return response.text();

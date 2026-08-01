@@ -112,7 +112,7 @@ export const AGENT_SETTINGS = {
     },
   },
   think: {
-    provider: { type: 'open_ai', model: 'gpt-5-mini' },
+    provider: { type: 'open_ai', model: 'gpt-4o-mini' },
     prompt,
     functions,
   },
