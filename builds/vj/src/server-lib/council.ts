@@ -449,7 +449,8 @@ function buildSettings(thinkModel: string) {
       language: 'en',
       listen: { provider: { type: 'deepgram', model: 'nova-3' } },
       think,
-      speak: { provider: { type: 'deepgram', model: 'aura-2-apollo-en' } },
+      // The live session speaks as the chair — voice follows the chair persona config.
+      speak: { provider: { type: 'deepgram', model: ROSTER.find((r) => r.kind === 'chair')?.voice || 'aura-2-odysseus-en' } },
     },
   };
 }
