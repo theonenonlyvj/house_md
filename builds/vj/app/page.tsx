@@ -34,13 +34,25 @@ function useSession(): S | null {
   return s;
 }
 
-// Chair speech: pull the PCM stream and play through Web Audio.
-function useChairAudio(enabled: boolean) {
+// Chair speech: pull the PCM stream and play through Web Audio. `interrupted` flips
+// when the session hears the clinician — we hard-flush the scheduled buffer so the
+// chair actually shuts up when interrupted instead of playing out its backlog.
+function useChairAudio(enabled: boolean, interrupted: boolean) {
+  const flushRef = useRef<() => void>(() => {});
+  useEffect(() => {
+    if (interrupted) flushRef.current();
+  }, [interrupted]);
   useEffect(() => {
     if (!enabled) return;
     const ctx = new AudioContext({ sampleRate: 24000 });
+    const scheduled = new Set<AudioBufferSourceNode>();
     let nextAt = 0;
     let stop = false;
+    flushRef.current = () => {
+      for (const src of scheduled) { try { src.stop(); } catch {} }
+      scheduled.clear();
+      nextAt = 0;
+    };
     (async () => {
       try {
         const res = await fetch('/api/audio');
@@ -62,13 +74,15 @@ function useChairAudio(enabled: boolean) {
           const src = ctx.createBufferSource();
           src.buffer = ab;
           src.connect(ctx.destination);
+          src.onended = () => scheduled.delete(src);
+          scheduled.add(src);
           nextAt = Math.max(nextAt, ctx.currentTime + 0.15);
           src.start(nextAt);
           nextAt += ab.duration;
         }
       } catch {}
     })();
-    return () => { stop = true; ctx.close(); };
+    return () => { stop = true; flushRef.current(); ctx.close(); };
   }, [enabled]);
 }
 
@@ -93,12 +107,17 @@ function useMic() {
         audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
       });
       const ctx = new AudioContext({ sampleRate: 24000 });
+      await ctx.resume(); // autoplay policy can leave it suspended → silent capture
       await ctx.audioWorklet.addModule('/pcm-worklet.js');
       const src = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'pcm-capture');
       node.port.onmessage = (e) => {
         const cur = ref.current;
-        if (!cur.muted && cur.ws && cur.ws.readyState === 1) cur.ws.send(e.data);
+        if (!cur.ws || cur.ws.readyState !== 1) return;
+        // CONTINUOUS stream: mute sends zero-frames instead of stopping — Deepgram's
+        // turn detection breaks on stalled streams (>10s transcript delays), and
+        // resuming mid-stream eats the first words. Unmute = pure flag flip.
+        cur.ws.send(cur.muted ? new ArrayBuffer((e.data as ArrayBuffer).byteLength) : e.data);
       };
       src.connect(node);
       ws.onclose = () => { ref.current.live = false; ref.current.muted = true; setState('off'); };
@@ -150,8 +169,8 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  useChairAudio(audioOn);
   const mic = useMic();
+  useChairAudio(audioOn, s?.activity === 'hearing you…');
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
