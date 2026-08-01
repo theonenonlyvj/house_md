@@ -12,12 +12,19 @@ const post = (url: string, body?: unknown) =>
 
 function useSession(): S | null {
   const [s, setS] = useState<S | null>(null);
+  const lastVersion = useRef(-1);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
         const r = await fetch('/api/session', { cache: 'no-store' });
-        if (alive) setS(await r.json());
+        const next: S = await r.json();
+        // Only re-render when server state actually changed — polling without this
+        // repaints the whole table every 700ms and feels randomly laggy.
+        if (alive && next.version !== lastVersion.current) {
+          lastVersion.current = next.version;
+          setS(next);
+        }
       } catch {}
     };
     tick();
@@ -55,7 +62,7 @@ function useChairAudio(enabled: boolean) {
           const src = ctx.createBufferSource();
           src.buffer = ab;
           src.connect(ctx.destination);
-          nextAt = Math.max(nextAt, ctx.currentTime + 0.05);
+          nextAt = Math.max(nextAt, ctx.currentTime + 0.15);
           src.start(nextAt);
           nextAt += ab.duration;
         }

@@ -460,6 +460,8 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
       mutate((s) => {
         const role = msg.role === 'assistant' ? 'chair' : 'clinician';
+        const last = s.transcript[s.transcript.length - 1];
+        if (last && last.role === role && last.text === text) return; // dedupe repeats
         s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text, at: Date.now() });
       });
       return;
@@ -475,7 +477,20 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       }
       return;
     }
+    if (msg.type === 'AgentThinking') {
+      mutate((s) => { s.activity = 'the chair is thinking…'; });
+      return;
+    }
+    if (msg.type === 'UserStartedSpeaking') {
+      mutate((s) => { s.activity = 'hearing you…'; });
+      return;
+    }
+    if (msg.type === 'AgentStartedSpeaking') {
+      mutate((s) => { s.activity = 'the chair is speaking'; });
+      return;
+    }
     if (msg.type === 'AgentAudioDone') {
+      mutate((s) => { s.activity = undefined; });
       void speakPendingLines();
       return;
     }
