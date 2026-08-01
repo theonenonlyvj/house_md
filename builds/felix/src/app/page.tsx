@@ -275,34 +275,11 @@ export default function LivingDifferentialPage() {
       processingFallbackRef.current = null;
       if (sessionRef.current !== session || chairSpeakingRef.current || specialistPlaybackRef.current) return;
       setVoice((current) => {
-        if (current === 'ready' || current === 'listening') setCaption('Room ready. Hold to present or play the reviewed case audio.');
+        if (current === 'ready' || current === 'listening') setCaption('Room ready. Hold to present the case.');
         return current === 'listening' ? 'ready' : current;
       });
     }, 5_000);
   }, [clearProcessingFallback]);
-
-  const feedPrerecorded = useCallback(async () => {
-    const session = sessionRef.current;
-    if (!session || voice !== 'ready') { setError('Connect the Deepgram room before sending prerecorded audio.'); return; }
-    setBusy('prerecorded');
-    setVoice('listening');
-    setCaption('Streaming clinically reviewed audio in real time…');
-    try {
-      const response = await fetch('/case-presentation.wav', { cache: 'no-store' });
-      if (!response.ok) throw new Error('Prerecorded WAV is unavailable.');
-      const pcm = await decodeToPcm24k(await response.arrayBuffer());
-      const frame = 960;
-      for (let offset = 0; offset < pcm.length; offset += frame) {
-        const chunk = pcm.slice(offset, Math.min(offset + frame, pcm.length));
-        session.sendAudio(chunk.buffer as ArrayBuffer);
-        await delay(40);
-      }
-      const silence = new Int16Array(frame);
-      for (let index = 0; index < 38; index += 1) { session.sendAudio(silence.buffer as ArrayBuffer); await delay(40); }
-      setCaption('Audio delivered through Deepgram. Waiting for the live transcript…');
-    } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-    finally { setBusy(''); setVoice('ready'); }
-  }, [voice]);
 
   const assemble = useCallback(async () => {
     const transcript = state?.transcript?.trim();
@@ -387,7 +364,6 @@ export default function LivingDifferentialPage() {
         <div className="caption"><strong>{activeSpeaker ? `${activeSpeaker} speaking` : voiceLabel(voice)}</strong><p>{caption}</p></div>
         <div className="voice-actions">
           {voice === 'offline' || voice === 'error' ? <button className="primary" onClick={connectVoice}>Connect voice room</button> : <>
-            <button className="secondary" disabled={voice !== 'ready' || busy !== ''} onClick={feedPrerecorded}>{busy === 'prerecorded' ? 'Streaming audio…' : 'Play reviewed case audio'}</button>
             <button className="talk-button" disabled={voice !== 'ready' && voice !== 'listening'} onPointerDown={beginTalk} onPointerUp={endTalk} onPointerCancel={endTalk}>Hold to present</button>
           </>}
         </div>
@@ -435,7 +411,6 @@ function JsonDrawer({ title, value, close }: { title: string; value: unknown; cl
   return <div className="drawer-backdrop" role="presentation" onMouseDown={close}><aside className="json-drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" onMouseDown={(event) => event.stopPropagation()}><header><div><h2 id="drawer-title">{title}</h2><p>FHIR R4 resource from the current session</p></div><button onClick={close} aria-label="Close raw JSON">Close</button></header><pre>{JSON.stringify(value, null, 2)}</pre></aside></div>;
 }
 
-async function decodeToPcm24k(data: ArrayBuffer) { const sourceContext = new AudioContext(); const decoded = await sourceContext.decodeAudioData(data.slice(0)); const offline = new OfflineAudioContext(1, Math.ceil(decoded.duration * 24_000), 24_000); const source = offline.createBufferSource(); source.buffer = decoded; source.connect(offline.destination); source.start(); const rendered = await offline.startRendering(); await sourceContext.close(); const floats = rendered.getChannelData(0); const pcm = new Int16Array(floats.length); for (let index = 0; index < floats.length; index += 1) pcm[index] = Math.max(-1, Math.min(1, floats[index])) * 0x7fff; return pcm; }
 const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const initials = (name: string) => name.split(/\s+/).map((part) => part[0]).filter(Boolean).slice(0, 2).join('').toUpperCase();
 const labelStatus = (status: SessionState['status']) => ({ loading: 'Loading record', presenting: 'Awaiting presentation', assembled: 'Council assembled', debating: 'Differential active', planning: 'Plan in review', finalized: 'Chart documented', error: 'Integration attention' }[status]);
