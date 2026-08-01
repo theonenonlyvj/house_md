@@ -128,11 +128,14 @@ export function board(s: SessionState, version: number, w: number, h: number): P
   if (cache.inflight) return cache.inflight;
   // Each draw amends the board that's already hanging — cards stay put, only the new
   // evidence gets pinned — so the demo reads as one board growing, not a reshuffle.
-  cache.inflight = draw(s, w, h, cache.svg)
+  // On a size change we start fresh instead: rescaling old coordinates by hand is what
+  // makes cards overlap and run off the edge.
+  const sameSize = cache.cacheKey.endsWith(`:${w}x${h}`);
+  cache.inflight = draw(s, w, h, sameSize ? cache.svg : '')
     .then((svg) => {
       // ponytail: a draw that comes back a fraction of the board's size dropped most of
       // the evidence — keep the old board rather than seed the next iteration from it.
-      const kept = cache.svg && svg.length < cache.svg.length * 0.4 ? cache.svg : svg;
+      const kept = sameSize && cache.svg && svg.length < cache.svg.length * 0.4 ? cache.svg : svg;
       cache.cacheKey = cacheKey;
       cache.svg = kept;
       return kept;
