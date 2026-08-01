@@ -294,6 +294,15 @@ export default function Page() {
     transcriptRef.current?.scrollTo({ top: 999999 });
   }, [s?.transcript.length]);
 
+  // Arriving from the EHR launch screen (/launch → "Convene Panel") auto-assembles once.
+  const convened = useRef(false);
+  useEffect(() => {
+    if (!convened.current && s?.phase === 'case-ready' && typeof location !== 'undefined' && location.search.includes('convene=1')) {
+      convened.current = true;
+      void post('/api/session/assemble');
+    }
+  }, [s?.phase]);
+
   const openCite = useCallback(async (rt: string, id: string) => {
     setDrawer({ title: `${rt}/${id}`, json: { loading: true } });
     const r = await fetch(`/api/resource/${rt}/${id}`);
