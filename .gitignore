@@ -11,3 +11,4 @@ scripts/out/
 
 # build artifact — it conflicts on every merge
 tsconfig.tsbuildinfo
+.tsbuildinfo

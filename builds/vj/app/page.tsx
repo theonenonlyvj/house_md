@@ -50,6 +50,13 @@ function useChairAudio(enabled: boolean, interrupted: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const ctx = new AudioContext({ sampleRate: 24000 });
+    // Always-on audio: browsers keep a fresh AudioContext suspended until a user
+    // gesture — try immediately (covers the /launch click-through), then unlock on
+    // the first gesture on this page.
+    void ctx.resume().catch(() => {});
+    const unlock = () => { void ctx.resume().catch(() => {}); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 256;
     analyser.connect(ctx.destination);
@@ -104,6 +111,8 @@ function useChairAudio(enabled: boolean, interrupted: boolean) {
     return () => {
       stop = true;
       cancelAnimationFrame(raf);
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
       document.documentElement.style.setProperty('--audio-level', '0');
       flushRef.current();
       ctx.close();
@@ -279,13 +288,12 @@ const PHASE_STATUS: Partial<Record<S['phase'], string>> = {
 export default function Page() {
   const s = useSession();
   const [drawer, setDrawer] = useState<{ title: string; json: unknown } | null>(null);
-  const [audioOn, setAudioOn] = useState(false);
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [boardOn, setBoardOn] = useState(true);
   const mic = useMic();
-  useChairAudio(audioOn, s?.activity === 'hearing you…');
+  useChairAudio(true, s?.activity === 'hearing you…');
   // Nothing to pin until the panel has said something — no board on an empty case.
   const boardUp = boardOn && !!s?.patient && (s.differential.length > 0 || s.contributions.length > 0 || s.transcript.length > 0);
   const board = useBoard(s?.version, boardUp);
@@ -409,7 +417,6 @@ export default function Page() {
   };
 
   const convene = () => {
-    setAudioOn(true); // the click is the user gesture the audio graph needs
     setFinalized(null);
     setCreated([]);
     void post('/api/session/assemble');
