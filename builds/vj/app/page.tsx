@@ -231,6 +231,12 @@ export default function Page() {
           })}
 
           <div className="center">
+            {s.phase === 'differential-ready' && !s.selectedHypothesisId && (
+              <div className="yourmove">⚖️ The council rests — <strong>your call, doctor</strong>: select the leading diagnosis below.</div>
+            )}
+            {(s.phase === 'workup-ready' || s.phase === 'benefits-ready') && (
+              <div className="yourmove">📋 <strong>Your move</strong>: review the plan and coverage, then <strong>Finalize → write to chart</strong>.</div>
+            )}
             {s.differential.length === 0 && (
               <div className="placeholder">
                 {s.phase === 'case-ready'

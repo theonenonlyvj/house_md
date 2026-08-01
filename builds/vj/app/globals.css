@@ -479,3 +479,13 @@ input[type='text']::placeholder { color: var(--muted); }
   font-size: 12.5px;
   padding: 10px 8px 16px;
 }
+
+/* your-move banner — the app must never look stuck while waiting on the clinician */
+.yourmove {
+  border: 2px solid var(--teal);
+  background: var(--teal-soft);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 14.5px;
+}

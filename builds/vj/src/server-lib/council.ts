@@ -372,9 +372,8 @@ function councilPrompt(): string {
 function buildSettings(thinkModel: string) {
   const think: any = { provider: { type: 'open_ai', model: thinkModel }, prompt: councilPrompt().slice(0, 24000), functions: FUNCTION_DEFS };
   // NOTE: no temperature — gpt-5-mini hard-rejects non-default values (verified live today).
-  const s = getState();
-  const empty = s.seating ? emptySeats(s.seating) : [];
-  const greeting = `Council assembled for ${s.patient?.name}. ${empty.length ? `Note for the record: this case warrants ${empty.map((e) => e.specialty).join(' and ')} — ${empty.length > 1 ? 'those seats are' : 'that seat is'} empty. We flag gaps, we don't fake them. ` : ''}Doctor, present your case.`;
+  // No greeting: the room assembles in silence while analysis runs — the first thing
+  // the clinician HEARS is the chair opening the actual conference (Vijay, 3:24pm).
   return {
     type: 'Settings',
     audio: { input: { encoding: 'linear16', sample_rate: 24000 }, output: { encoding: 'linear16', sample_rate: 24000, container: 'none' } },
@@ -383,15 +382,16 @@ function buildSettings(thinkModel: string) {
       listen: { provider: { type: 'deepgram', model: 'nova-3' } },
       think,
       speak: { provider: { type: 'deepgram', model: 'aura-2-apollo-en' } },
-      greeting: greeting.slice(0, 295),
     },
   };
 }
 
 // ---- session lifecycle ----
 export async function assemble(presentation: string): Promise<void> {
+  mutate((s) => { s.phase = 'reasoning'; s.activity = 'loading the chart from Medplum…'; });
   const chart = await loadChart();
   live.chart = chart;
+  mutate((s) => { s.activity = `chart loaded — ${chart.aliases.length} records; deriving case features…`; });
   const { kickChartIndex } = await import('./moss');
   kickChartIndex(chart);
   const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
@@ -401,7 +401,7 @@ export async function assemble(presentation: string): Promise<void> {
     s.features = features;
     s.seating = seating;
     s.phase = 'reasoning';
-    s.activity = chart.source === 'dev-local' ? 'DEV CHART (Medplum patient pending — plug Noah’s seed into case config)' : undefined;
+    s.activity = 'the council is convening — deliberation begins shortly…';
     s.transcript.push({ role: 'clinician', text: presentation, at: Date.now() });
   });
 

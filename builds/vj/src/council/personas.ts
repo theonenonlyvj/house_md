@@ -1,9 +1,8 @@
 import type { Persona } from '../shared/types';
 
-// PLACEHOLDER ROSTER — Vijay provides the final persona list; swap here, zero code
-// changes. Duplicate specialties are allowed (incl. duplicating the human's).
-// Deliberately no hematology in the default roster; if the final list adds it, the
-// empty-seat beat may simply not fire for the default case — accepted (PLAN-FINAL §3).
+// ROSTER (config — swap freely, zero code changes). Duplicate specialties allowed.
+// Vijay's ruling 3:24pm: the default case seats everything it needs — the empty-seat
+// MECHANISM stays in the seating engine for cases the roster genuinely can't cover.
 export const ROSTER: Persona[] = [
   {
     id: 'chair-house',
@@ -68,6 +67,14 @@ export const ROSTER: Persona[] = [
     kind: 'specialist',
     style: 'Hormones hide in plain sight. Rules the metabolic mimics in or out.',
     voice: 'aura-asteria-en',
+  },
+  {
+    id: 'hematology',
+    name: 'Dr. Osei',
+    specialty: 'hematology',
+    kind: 'specialist',
+    style: 'Protects the AL branch. Multisystem infiltrative pictures are hematologic until the monoclonal screen says otherwise.',
+    voice: 'aura-2-thalia-en',
   },
 ];
 
