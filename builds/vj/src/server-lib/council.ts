@@ -448,9 +448,13 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       return;
     }
     if (msg.type === 'ConversationText') {
+      const text = String(msg.content || '');
+      // Guard: models occasionally echo prompt fragments as assistant turns — keep
+      // the spoken transcript short, human lines only.
+      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
       mutate((s) => {
         const role = msg.role === 'assistant' ? 'chair' : 'clinician';
-        s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text: String(msg.content || ''), at: Date.now() });
+        s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text, at: Date.now() });
       });
       return;
     }
