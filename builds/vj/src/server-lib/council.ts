@@ -97,9 +97,29 @@ const FUNCTION_DEFS = [
     },
   },
   {
+    name: 'present_specialist_turn',
+    description:
+      "Present ONE specialist's turn. The system speaks spoken_line ALOUD IN THAT SPECIALIST'S OWN VOICE — never voice it yourself; after calling, give at most one short plain-English chair framing line and move to the next specialist. Call once per specialist, in turn order. Claims must cite aliases from search_patient_evidence.",
+    parameters: {
+      type: 'object',
+      properties: {
+        personaId: { type: 'string', description: 'the specialist persona id (e.g. pulmo, gastro, id)' },
+        spoken_line: { type: 'string', description: "the specialist's spoken turn, first person, ≤45 words, plain English, citing a dated chart item" },
+        claim: { type: 'string', description: 'their leading interpretation for the board' },
+        aliases: { type: 'array', items: { type: 'string' } },
+        contradiction: {
+          type: 'object',
+          properties: { claim: { type: 'string' }, aliases: { type: 'array', items: { type: 'string' } } },
+        },
+        discriminator: { type: 'string' },
+      },
+      required: ['personaId', 'spoken_line', 'claim'],
+    },
+  },
+  {
     name: 'submit_council_output',
     description:
-      'Submit the full council debate as structured data. Every specialist contribution and every differential evidence claim must carry aliases from search_patient_evidence. Claims without valid aliases will be labeled CONJECTURE automatically.',
+      'AFTER all specialist turns are presented: submit the ranked differential (2-4 items, REQUIRED, non-empty) and your chair summary. Every evidence claim must carry aliases from search_patient_evidence. Claims without valid aliases will be labeled CONJECTURE automatically.',
     parameters: {
       type: 'object',
       properties: {
@@ -223,7 +243,41 @@ async function runTool(name: string, args: any): Promise<unknown> {
     };
   }
 
+  if (name === 'present_specialist_turn') {
+    const personaOf = (pid: string, spec = '') =>
+      ROSTER.find((r) => r.id === pid) ||
+      ROSTER.find((r) => r.name.toLowerCase() === String(pid).toLowerCase()) ||
+      ROSTER.find((r) => r.specialty === spec) ||
+      ROSTER.find((r) => String(pid).toLowerCase().includes(r.id));
+    const p = personaOf(String(args.personaId || ''));
+    if (!p) return { error: `unknown persona ${args.personaId} — valid ids: ${ROSTER.map((r) => r.id).join(', ')}` };
+    const contribution: SpecialistContribution = {
+      personaId: p.id,
+      specialty: p.specialty,
+      interpretation: validateArgument({ claim: args.claim, aliases: args.aliases }, amap),
+      contradiction: args.contradiction ? validateArgument(args.contradiction, amap) : undefined,
+      discriminator: args.discriminator ? String(args.discriminator).slice(0, 200) : undefined,
+    };
+    mutate((s) => {
+      s.contributions = [...s.contributions.filter((c) => c.personaId !== p.id), contribution];
+      s.activity = `${p.name} has the floor`;
+    });
+    if (p.voice) {
+      live.pendingLines.push({ name: p.name, voice: p.voice, text: String(args.spoken_line || args.claim).slice(0, 500), personaId: p.id });
+      setTimeout(() => void speakPendingLines(), 600);
+    }
+    return {
+      ok: true,
+      spoken_in_own_voice: true,
+      provenance: contribution.interpretation.provenance,
+      note: 'The line is being spoken in their voice now — do NOT repeat it. One short chair framing line, then the next specialist (or submit_council_output if all have spoken).',
+    };
+  }
+
   if (name === 'submit_council_output') {
+    if (!Array.isArray(args.differential) || args.differential.length === 0) {
+      return { error: 'differential is REQUIRED and non-empty — present all specialist turns first, then submit the ranked differential.' };
+    }
     const contributions: SpecialistContribution[] = (args.contributions || []).map((c: any) => ({
       personaId: String(c.personaId || ''),
       specialty: String(c.specialty || ''),
@@ -246,26 +300,9 @@ async function runTool(name: string, args: any): Promise<unknown> {
       ...differential.flatMap((d) => [...d.supporting, ...d.contradicting]),
     ].filter((a) => a.provenance === 'conjecture').length;
 
-    // Audible panel: every specialist speaks their turn in their own voice, in roster
-    // order (the DEMO_SPEC runbook), queued behind current speech. Model personaId
-    // strings are loose (id/name/specialty) — resolve fuzzily.
-    const personaOf = (c: SpecialistContribution) =>
-      ROSTER.find((r) => r.id === c.personaId) ||
-      ROSTER.find((r) => r.name === c.personaId || r.name.toLowerCase() === String(c.personaId).toLowerCase()) ||
-      ROSTER.find((r) => r.specialty === c.specialty) ||
-      ROSTER.find((r) => c.specialty.toLowerCase().includes(r.specialty.split('-')[0]));
-    const heard: typeof live.pendingLines = [];
-    for (const rp of ROSTER.filter((r) => r.kind === 'specialist')) {
-      const c = contributions.find((x) => personaOf(x)?.id === rp.id);
-      if (c && rp.voice) heard.push({ name: rp.name, voice: rp.voice, text: c.interpretation.claim, personaId: rp.id });
-    }
-    live.pendingLines = heard.slice(0, 3);
-    console.log('[council] queued audible lines:', live.pendingLines.length, live.pendingLines.map((l) => l.name));
-    // Chair audio may already be done (AgentAudioDone can precede this tool call) —
-    // schedule playback; the speaking flag + FIFO keep it overlap-safe.
-    setTimeout(() => void speakPendingLines(), 4000);
+    // Specialist voices already played per-turn via present_specialist_turn.
     mutate((s) => {
-      s.contributions = contributions;
+      if (contributions.length > 0) s.contributions = contributions;
       s.differential = differential.sort((a, b) => a.rank - b.rank);
       // Never regress the phase if the session already advanced past the debate.
       if (['reasoning', 'retrieving-evidence', 'case-ready', 'listening'].includes(s.phase)) {
@@ -392,7 +429,7 @@ function councilPrompt(): string {
     empty.length
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. Say so on the record; NO ONE improvises missing expertise.`
       : '',
-    `RULES: (1) Decision support, not diagnosis — the panel argues, the clinician decides; never present a diagnosis as established. The human clinician is ${'Dr. Lee'}; "Can you take a look?" hands you the floor. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches from different angles (current symptoms; labs over the years; old intake/social history and notes — longitudinal records hide the good clues years back; also read oldest_history_not_in_results). Cite only returned aliases (E1, E2…) in tool JSON; uncited claims auto-label CONJECTURE. (3) Turn order: ${specialistOrder} — each specialist's contribution cites a specific dated chart item; then submit via submit_council_output. (4) PLAIN ENGLISH for a lay audience: everyday words first, at most one technical term per turn, introduced after the plain phrase ("look inside his lungs with a camera — a bronchoscopy"). (5) Challenge the weakest-cited claim before accepting it. (6) After the clinician selects the direction: propose_workup (tests AND any consult/treatment the pathway warrants), then get_benefits — the ADVOCATE has already spoken the returned figures; don't repeat them, connect the affordable plan to the safe plan. Never invent prices or coverage. (7) SPOKEN OUTPUT: after each tool call, ONE short line and hand the floor. NEVER read structured output, bullets, or lists aloud — the table shows the detail.`,
+    `RULES: (1) Decision support, not diagnosis — the panel argues, the clinician decides; never present a diagnosis as established. The human clinician is ${'Dr. Lee'}; "Can you take a look?" hands you the floor. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches from different angles (current symptoms; labs over the years; old intake/social history and notes — longitudinal records hide the good clues years back; also read oldest_history_not_in_results). Cite only returned aliases (E1, E2…) in tool JSON; uncited claims auto-label CONJECTURE. (3) THE CONFERENCE FLOW — turn order: ${specialistOrder}. For each specialist: say ONE short chair framing line aloud ("Lungs. Go."), then call present_specialist_turn for them — the system speaks their line IN THEIR OWN VOICE; never voice a specialist yourself, never repeat their line; optionally add one plain-English translation sentence. After ALL specialists have presented: call submit_council_output with the ranked differential (non-empty), then speak your synthesis. (4) PLAIN ENGLISH for a lay audience: everyday words first, at most one technical term per turn, introduced after the plain phrase ("look inside his lungs with a camera — a bronchoscopy"). (5) Challenge the weakest-cited claim before accepting it. (6) After the clinician selects the direction: propose_workup (tests AND any consult/treatment the pathway warrants), then get_benefits — the ADVOCATE has already spoken the returned figures; don't repeat them, connect the affordable plan to the safe plan. Never invent prices or coverage. (7) SPOKEN OUTPUT: after each tool call, ONE short line and hand the floor. NEVER read structured output, bullets, or lists aloud — the table shows the detail.`,
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
