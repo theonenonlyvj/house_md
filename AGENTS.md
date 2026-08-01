@@ -2,9 +2,10 @@
 
 One-day hackathon build (YC × Medplum Agentic Healthcare Hackathon, Sat 2026-08-01,
 **submit 5:00pm PT**). Team: Vijay, Thai, Noah, Felix. Canonical build source:
-`docs/PLAN-V2.md`. Product and decision guidance: `docs/PRINCIPLES.md`. Original plan:
-`docs/PLAN.md`. Separate video constraint: `docs/DEMO.md`. Provider notes:
-`docs/notes/`. This file applies to every
+**`docs/PLAN-FINAL.md`** (self-contained; agreed by Vijay + Felix ~1:17pm). Decision
+guidance: `docs/PRINCIPLES.md`. History (do not build from): `docs/PLAN.md`,
+`docs/PLAN-V2.md`, `docs/INFRA-PROPOSAL.md`, `docs/DECISIONS.md`. Video constraint:
+`docs/DEMO.md`. Provider notes: `docs/notes/`. This file applies to every
 coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
 
 ## Ground rules
@@ -25,15 +26,15 @@ coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
   data. MockClient gaps: NO chained search, NO $-operations, subscriptions don't fire
   (use an in-process dispatcher; keep Bot handlers deploy-ready).
 - **Voice: deterministic input first.** A clinically reviewed prerecorded utterance may
-  be the guaranteed input, but it must pass through the selected Deepgram-managed Voice
-  Agent setup (Flux STT, managed GPT-5.5, Flux TTS) and the same Moss, Medplum, and
-  Stedi path. Never inject a stored transcript or canned downstream success.
+  be the guaranteed input, but it must pass through the Deepgram-managed Voice Agent
+  setup (exact models = voice workstream's call, see PLAN-FINAL §6) and the same Moss,
+  Medplum, and Stedi path. Never inject a stored transcript or canned downstream success.
 - **One application.** The product is one Next.js application centered on the Living
   Differential Whiteboard. Do not introduce a separately deployed frontend/backend or
   spin supporting states into separate dashboards.
-- **Integration status is literal.** `docs/PLAN-V2.md` records what is designed,
-  verified, integrated, and demo-ready. At the current starting point only the Stedi
-  standalone POC is verified code; do not describe the other provider paths as
+- **Integration status is literal.** `docs/PLAN-FINAL.md` records what is designed,
+  verified, integrated, and demo-ready. Verified code so far: the Stedi standalone POC
+  and the voice-poc TTS/STT/Moss wiring; do not describe other provider paths as
   implemented until their stated proof succeeds.
 - Time-box any debugging spiral to 20 minutes, then simplify or stub.
 - On Vijay's machine, default `node` is v12 — prefix commands with
@@ -52,8 +53,8 @@ coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
 
 ## Scope gates (from the plan — respect them)
 
-- 1:00pm — DDx conversation works TEXT-first.
+- 2:00pm — text-first council loop end-to-end (slipped 1pm gate; planning ran to 1:20).
 - 2:00pm — voice gate: microphone or prerecorded audio through the managed Deepgram
   Voice Agent; downstream provider calls remain real.
 - 3:00pm — Stedi leg: ONE eligibility call rendered in the options UI is enough.
-- 4:00pm — stop building; rehearse the demo, fill the submission form.
+- 4:00pm — stop building; rehearse, record the video, fill the submission form.
