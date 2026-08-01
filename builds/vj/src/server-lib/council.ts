@@ -205,8 +205,8 @@ async function runTool(name: string, args: any): Promise<unknown> {
     const q = String(args.query || '');
     mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${q.slice(0, 80)}"`; });
     const { mossSearch } = await import('./moss');
-    const mossHits = await mossSearch(chart, q);
-    const hits = mossHits ?? searchEvidence(chart, q);
+    const mossHits = await mossSearch(chart, q, 10);
+    const hits = mossHits ?? searchEvidence(chart, q, 10);
     const source = mossHits ? 'Moss semantic search' : 'chart keyword search';
     mutate((s) => { s.activity = `${source}: ${hits.length} of ${chart.aliases.length} records for "${q.slice(0, 50)}"`; });
     return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
@@ -362,7 +362,7 @@ function councilPrompt(): string {
     empty.length
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
       : '',
-    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence; cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) Keep spoken output short; the table shows the detail.',
+    'RULES: (1) Decision support, not diagnosis — the council argues, the clinician decides; never present a diagnosis as established. (2) Before ANY patient-specific claim, call search_patient_evidence — AT LEAST THREE searches with different angles (current symptoms; imaging/cardiac studies; past procedures, surgical history and older clues — longitudinal records hide the good stuff years back). Cite only returned aliases (E1, E2…) in tool JSON. Uncited claims get auto-labeled CONJECTURE — acknowledge demotions. (3) Submit the debate via submit_council_output: every seated specialist contributes {leading interpretation + strongest evidence, strongest contradiction, one discriminating step}; the skeptic attacks the leading hypothesis. (4) Challenge the weakest-cited claim before accepting it. (5) After the clinician selects a hypothesis: propose_workup, then get_benefits, then Ms. Okafor (patient services) speaks ONLY the returned coverage facts and the re-sequencing. Never invent prices or coverage. (6) SPOKEN OUTPUT: after submitting the tool call, say ONE short synthesis line and hand the floor ("Amyloid leads; hypertension a distant second. Your call, doctor."). NEVER read the structured output, bullets, evidence lists, or specialist entries aloud — the table shows the detail.',
     `PATIENT (synthetic): ${s.patient?.name}, DOB ${s.patient?.dob}. Chief complaint: ${s.features?.chiefComplaint}.`,
   ]
     .filter(Boolean)
@@ -457,7 +457,9 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       const text = String(msg.content || '').replace(/^\s*(?:speaking as\s+)?(?:the\s+)?(?:chair|house(?:,?\s*m\.?d\.?)?)(?:\s*\([^)]{0,40}\))?\s*[:—-]+\s*/i, '');
       // Guard: models occasionally echo prompt fragments as assistant turns — keep
       // the spoken transcript short, human lines only.
-      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
+      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style|^\s*[-•(]|^\s*(Interpretation|Contradiction|Discriminator|Evidence)\b/i.test(text))) return;
+      // Hide stage-direction injects (our composed instructions) from the visible dialog.
+      if (msg.role !== 'assistant' && /submit_council_output|propose_workup|get_benefits|convene the council/i.test(text)) return;
       mutate((s) => {
         const role = msg.role === 'assistant' ? 'chair' : 'clinician';
         const last = s.transcript[s.transcript.length - 1];
