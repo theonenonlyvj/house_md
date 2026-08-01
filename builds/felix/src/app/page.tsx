@@ -7,6 +7,7 @@ import { isSessionState, specialistLinesFor, type SpecialistLine } from '@/clien
 import type { Claim, CreatedResource, EvidenceItem, IntegrationName, Seat, SessionState, WorkupItem } from '@/domain/types';
 
 const SESSION_ID = 'demo-session';
+const INTEGRATION_NAMES: IntegrationName[] = ['medplum', 'deepgram', 'moss', 'stedi'];
 
 export default function LivingDifferentialPage() {
   const [state, setState] = useState<SessionState | null>(null);
@@ -23,18 +24,22 @@ export default function LivingDifferentialPage() {
   const specialistPlaybackRef = useRef(false);
   const specialistEpochRef = useRef(0);
   const chairSpeakingRef = useRef(false);
+  const processingFallbackRef = useRef<number | null>(null);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/session?id=${SESSION_ID}`, { cache: 'no-store' });
-    const value = await response.json();
-    if (!response.ok && !value.id) throw new Error(value.error || 'Unable to load session');
+    const value = await response.json() as unknown;
+    const responseError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
+    if (!response.ok) throw new Error(responseError || 'Unable to load session');
+    if (!isSessionState(value)) throw new Error('Session API returned an invalid state payload.');
     setState(value);
     if (value.error) setError(value.error);
-    return value as SessionState;
+    return value;
   }, []);
 
   useEffect(() => { refresh().catch((reason) => setError(reason.message)); }, [refresh]);
   useEffect(() => () => {
+    if (processingFallbackRef.current !== null) window.clearTimeout(processingFallbackRef.current);
     microphoneRef.current?.stop();
     sessionRef.current?.disconnect();
     playerRef.current?.dispose();
@@ -45,10 +50,12 @@ export default function LivingDifferentialPage() {
     setError('');
     try {
       const response = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: SESSION_ID, ...body }) });
-      const value = await response.json();
-      if (!response.ok) throw new Error(value.error || 'Request failed');
+      const value = await response.json() as unknown;
+      const responseError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
+      if (!response.ok) throw new Error(responseError || 'Request failed');
+      if (!isSessionState(value)) throw new Error(`${path} returned an invalid session state.`);
       setState(value);
-      return value as SessionState;
+      return value;
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
       throw reason;
@@ -62,6 +69,13 @@ export default function LivingDifferentialPage() {
     specialistQueueRef.current = [];
     playerRef.current?.interrupt();
     setActivePersona('');
+  }, []);
+
+  const clearProcessingFallback = useCallback(() => {
+    if (processingFallbackRef.current !== null) {
+      window.clearTimeout(processingFallbackRef.current);
+      processingFallbackRef.current = null;
+    }
   }, []);
 
   const playSpecialists = useCallback(async () => {
@@ -158,6 +172,7 @@ export default function LivingDifferentialPage() {
   }, [playSpecialists]);
 
   const connectVoice = useCallback(async () => {
+    clearProcessingFallback();
     microphoneRef.current?.stop();
     microphoneRef.current = null;
     sessionRef.current?.disconnect();
@@ -188,14 +203,14 @@ export default function LivingDifferentialPage() {
     sessionRef.current = session;
 
     session.on('settings-applied', () => { setVoice('ready'); setCaption('Room connected. Hold to present the case.'); });
-    session.on('audio', (chunk) => { player.queue(chunk); setVoice('speaking'); });
+    session.on('audio', (chunk) => { clearProcessingFallback(); player.queue(chunk); setVoice('speaking'); });
     session.on('conversation-text', (message) => {
       const text = message.content ?? '';
-      if (text) setCaption(text);
+      if (text) { clearProcessingFallback(); setCaption(text); }
       if (message.role === 'user' && text) setState((current) => current ? { ...current, transcript: text } : current);
     });
     session.on('user-started-speaking', () => { chairSpeakingRef.current = false; flushSpecialists(); setVoice('listening'); });
-    session.on('agent-started-speaking', () => { chairSpeakingRef.current = true; setVoice('speaking'); });
+    session.on('agent-started-speaking', () => { clearProcessingFallback(); chairSpeakingRef.current = true; setVoice('speaking'); });
     session.on('agent-audio-done', () => {
       chairSpeakingRef.current = false;
       const playbackDelay = Math.ceil(player.getRemainingPlaybackTime() * 1_000);
@@ -205,7 +220,7 @@ export default function LivingDifferentialPage() {
         else setVoice('ready');
       }, playbackDelay);
     });
-    session.on('function-call-request', (message) => void handleFunctionCalls(message, session));
+    session.on('function-call-request', (message) => { clearProcessingFallback(); void handleFunctionCalls(message, session); });
     session.on('error', (message) => {
       setVoice('error');
       setError(('description' in message && message.description) || 'Deepgram agent error');
@@ -220,9 +235,10 @@ export default function LivingDifferentialPage() {
       setVoice('error');
       setError(reason instanceof Error ? reason.message : String(reason));
     }
-  }, [flushSpecialists, handleFunctionCalls, playSpecialists]);
+  }, [clearProcessingFallback, flushSpecialists, handleFunctionCalls, playSpecialists]);
 
   const beginTalk = useCallback(async (event: ReactPointerEvent<HTMLButtonElement>) => {
+    clearProcessingFallback();
     event.currentTarget.setPointerCapture(event.pointerId);
     if (voice !== 'ready' && voice !== 'listening') return;
     try {
@@ -238,9 +254,23 @@ export default function LivingDifferentialPage() {
       setVoice('listening');
       setCaption('Listening… release when finished.');
     } catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
-  }, [flushSpecialists, voice]);
+  }, [clearProcessingFallback, flushSpecialists, voice]);
 
-  const endTalk = useCallback(() => { microphoneRef.current?.mute(); setVoice('ready'); setCaption('Processing the clinician’s presentation…'); }, []);
+  const endTalk = useCallback(() => {
+    microphoneRef.current?.mute();
+    setVoice('ready');
+    setCaption('Processing the clinician’s presentation…');
+    clearProcessingFallback();
+    const session = sessionRef.current;
+    processingFallbackRef.current = window.setTimeout(() => {
+      processingFallbackRef.current = null;
+      if (sessionRef.current !== session || chairSpeakingRef.current || specialistPlaybackRef.current) return;
+      setVoice((current) => {
+        if (current === 'ready' || current === 'listening') setCaption('Room ready. Hold to present or play the reviewed case audio.');
+        return current === 'listening' ? 'ready' : current;
+      });
+    }, 5_000);
+  }, [clearProcessingFallback]);
 
   const feedPrerecorded = useCallback(async () => {
     const session = sessionRef.current;
@@ -284,6 +314,7 @@ export default function LivingDifferentialPage() {
   }, [api]);
 
   if (!state) return <main className="loading-shell" aria-busy="true"><div className="loading-line" /><p>Loading the synthetic patient record from Medplum…</p></main>;
+  if (!isSessionState(state)) return <main className="loading-shell" role="alert"><div className="loading-line" /><p>The session response was invalid. Reload to reconnect safely.</p></main>;
   const activeSpeaker = state.seats.find((seat) => seat.persona?.id === activePersona)?.label;
 
   return (
@@ -300,7 +331,7 @@ export default function LivingDifferentialPage() {
       </header>
 
       <section className="integration-bar" aria-label="Integration status">
-        {(Object.keys(state.integrations) as IntegrationName[]).map((name) => <Integration key={name} name={name} state={state.integrations[name]} />)}
+        {INTEGRATION_NAMES.map((name) => <Integration key={name} name={name} state={state.integrations[name]} />)}
       </section>
 
       {error && <div className="error-banner" role="alert"><div><strong>Action could not complete</strong><span>{error}</span></div><button onClick={() => { setError(''); refresh(); }}>Retry state</button></div>}

@@ -3,10 +3,16 @@ import { isSessionState, specialistLinesFor } from './voice-functions';
 import type { SessionState } from '@/domain/types';
 
 const claim = { text: 'Amyloid pattern is plausible.', citations: ['E1'], resolvedResourceIds: ['DiagnosticReport/1'], grounding: 'record-cited' as const };
+const integration = { state: 'ready' as const, detail: 'Available' };
 const state = {
   id: 'demo-session',
   status: 'debating',
-  integrations: {},
+  integrations: {
+    medplum: integration,
+    deepgram: integration,
+    moss: integration,
+    stedi: integration,
+  },
   seats: [
     { id: 'chair', label: 'House, M.D.', specialty: 'chair', kind: 'chair', reason: '', persona: { id: 'house' } },
     { id: 'skeptic', label: 'Dr. Rowan Vale', specialty: 'skeptic', kind: 'specialist', reason: '', persona: { id: 'skeptic', name: 'Dr. Rowan Vale' } },
@@ -26,6 +32,7 @@ const state = {
 describe('voice function response routing', () => {
   it('does not mistake consult context for renderable session state', () => {
     expect(isSessionState({ personas: [], evidence: [], emptySeats: [] })).toBe(false);
+    expect(isSessionState({ ...state, integrations: {} })).toBe(false);
     expect(specialistLinesFor('consult_council', { personas: [] })).toEqual([]);
   });
 

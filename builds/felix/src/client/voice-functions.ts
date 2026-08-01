@@ -6,12 +6,23 @@ export interface SpecialistLine {
   text: string;
 }
 
+const INTEGRATION_NAMES = ['medplum', 'deepgram', 'moss', 'stedi'] as const;
+const OPERATION_STATES = new Set(['idle', 'working', 'ready', 'error']);
+
 export function isSessionState(value: unknown): value is SessionState {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Partial<SessionState>;
+  const integrations = candidate.integrations;
+  const hasRenderableIntegrations = Boolean(integrations && typeof integrations === 'object')
+    && INTEGRATION_NAMES.every((name) => {
+      const integration = integrations?.[name];
+      return Boolean(integration
+        && OPERATION_STATES.has(integration.state)
+        && typeof integration.detail === 'string');
+    });
   return typeof candidate.id === 'string'
     && typeof candidate.status === 'string'
-    && Boolean(candidate.integrations && typeof candidate.integrations === 'object')
+    && hasRenderableIntegrations
     && Array.isArray(candidate.seats)
     && Array.isArray(candidate.contributions)
     && Array.isArray(candidate.differential)
