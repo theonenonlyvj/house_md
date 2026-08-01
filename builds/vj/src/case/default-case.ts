@@ -14,6 +14,9 @@ export interface CaseConfig {
   presentation: string;
   clinicianSpecialty: string;
   clinicianName: string;
+  // Demo panel mode: seat the entire roster (the DEMO_SPEC cast) instead of
+  // deriving seats from case features.
+  seatFullRoster?: boolean;
   stediScenario: string;
   payerLabel: string;
 }
@@ -33,6 +36,7 @@ export const DEFAULT_CASE: CaseConfig = {
     "This is my patient Mr. Pham, he's 62. I diagnosed him with asthma last year and started steroids two weeks ago, but he keeps getting worse — and now he has stomach pain and a fever too. I'm debating two things: do I increase the steroids, or is there something else going on that I'm missing? Can you take a look?",
   clinicianSpecialty: 'primary-care',
   clinicianName: 'Dr. Lee',
+  seatFullRoster: true,
   stediScenario: 'uhc',
   payerLabel: 'Commercial PPO (Stedi test mode)',
 };
