@@ -138,6 +138,7 @@ export default function Page() {
   const [drawer, setDrawer] = useState<{ title: string; json: unknown } | null>(null);
   const [audioOn, setAudioOn] = useState(false);
   const [finalized, setFinalized] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   useChairAudio(audioOn);
   const ptt = usePushToTalk();
@@ -167,6 +168,7 @@ export default function Page() {
     });
     const data = await res.json();
     setFinalized(res.ok ? `Wrote ${data.created?.length ?? 0} resources to the chart.` : `Write-back failed: ${data.error}`);
+    if (res.ok) setCreated(data.created || []);
   }, [s]);
 
   if (!s) return <div className="footer-note">loading…</div>;
@@ -300,14 +302,16 @@ export default function Page() {
               </>
             )}
 
-            {s.createdResources.length > 0 && (
+            {(created.length > 0 || s.createdResources.length > 0) && (
               <>
-                <h3>Written to chart</h3>
-                {s.createdResources.map((r) => (
-                  <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
-                    {r.resourceType}/{r.id}
-                  </span>
-                ))}
+                <h3>Written to chart — click to inspect the real FHIR</h3>
+                <div>
+                  {[...created, ...s.createdResources].map((r) => (
+                    <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
+                      {r.resourceType}/{r.id.slice(0, 8)}…
+                    </span>
+                  ))}
+                </div>
               </>
             )}
           </div>
