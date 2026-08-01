@@ -1,5 +1,0 @@
-{
-  "/api/session/assemble/route": "app/api/session/assemble/route.js",
-  "/api/session/reset/route": "app/api/session/reset/route.js",
-  "/api/session/route": "app/api/session/route.js"
-}
