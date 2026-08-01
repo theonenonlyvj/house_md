@@ -19,9 +19,48 @@ interface Live {
   ready: boolean;
   chart: LoadedChart | null;
   patientPlanText: string;
+  keepAlive: ReturnType<typeof setInterval> | null;
+  pendingLines: { name: string; voice: string; text: string; personaId: string }[];
+  speaking: boolean;
 }
-if (!g.__housemd_live) g.__housemd_live = { ws: null, ready: false, chart: null, patientPlanText: '' } as Live;
+if (!g.__housemd_live) g.__housemd_live = { ws: null, ready: false, chart: null, patientPlanText: '', keepAlive: null, pendingLines: [], speaking: false } as Live;
 const live: Live = g.__housemd_live;
+
+// Audible council (max two heard lines per debate round): TTS each pending specialist
+// line in its persona's own Aura voice, pushed into the same PCM stream strictly
+// AFTER the chair's audio is done — no overlapping speech.
+async function speakPendingLines(): Promise<void> {
+  if (live.speaking || live.pendingLines.length === 0) return;
+  live.speaking = true;
+  try {
+    while (live.pendingLines.length > 0) {
+      const line = live.pendingLines.shift()!;
+      try {
+        const res = await fetch(
+          `https://api.deepgram.com/v1/speak?model=${encodeURIComponent(line.voice)}&encoding=linear16&sample_rate=24000&container=none`,
+          {
+            method: 'POST',
+            headers: { Authorization: `Token ${key('DEEPGRAM_API_KEY')}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: line.text.slice(0, 600) }),
+            signal: AbortSignal.timeout(20000),
+          }
+        );
+        if (!res.ok) continue;
+        const pcm = Buffer.from(await res.arrayBuffer());
+        mutate((s) => { s.transcript.push({ role: 'specialist', personaId: line.personaId, text: `${line.name}: ${line.text}`, at: Date.now() }); });
+        // stream in ~200ms slices so playback starts promptly
+        const slice = 9600;
+        for (let i = 0; i < pcm.length; i += slice) {
+          pushAudio(pcm.subarray(i, Math.min(i + slice, pcm.length)));
+        }
+      } catch {
+        // one failed line never blocks the session
+      }
+    }
+  } finally {
+    live.speaking = false;
+  }
+}
 
 // ---- citation validation (Guardrail #2 — computed, never model-asserted) ----
 export function validateArgument(
@@ -187,10 +226,25 @@ async function runTool(name: string, args: any): Promise<unknown> {
       ...contributions.map((c) => c.interpretation),
       ...differential.flatMap((d) => [...d.supporting, ...d.contradicting]),
     ].filter((a) => a.provenance === 'conjecture').length;
+
+    // Audible council: queue up to TWO heard lines — first cited specialist + the
+    // skeptic — in their own voices (PLAN-FINAL §3). Played after chair audio ends.
+    const heard: typeof live.pendingLines = [];
+    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && ROSTER.find((r) => r.id === c.personaId)?.kind === 'specialist');
+    const skeptic = contributions.find((c) => ROSTER.find((r) => r.id === c.personaId)?.kind === 'skeptic');
+    for (const c of [firstCited, skeptic]) {
+      if (!c) continue;
+      const p = ROSTER.find((r) => r.id === c.personaId);
+      if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
+    }
+    live.pendingLines = heard.slice(0, 2);
     mutate((s) => {
       s.contributions = contributions;
       s.differential = differential.sort((a, b) => a.rank - b.rank);
-      s.phase = 'differential-ready';
+      // Never regress the phase if the session already advanced past the debate.
+      if (['reasoning', 'retrieving-evidence', 'case-ready', 'listening'].includes(s.phase)) {
+        s.phase = 'differential-ready';
+      }
       s.activity = demoted > 0 ? `${demoted} uncited claim(s) demoted to conjecture` : 'all claims cited';
     });
     return { ok: true, conjecture_demotions: demoted, note: demoted > 0 ? 'Chair: acknowledge the demoted claims as conjecture.' : 'All claims validated.' };
@@ -351,6 +405,14 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
 
     if (msg.type === 'SettingsApplied') {
       live.ready = true;
+      // Headless session streams no mic audio — KeepAlive every 5s or Deepgram
+      // closes with CLIENT_MESSAGE_TIMEOUT (verified the hard way).
+      if (live.keepAlive) clearInterval(live.keepAlive);
+      live.keepAlive = setInterval(() => {
+        if (ws === live.ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: 'KeepAlive' }));
+        }
+      }, 5000);
       // Drive the debate: inject the presentation as the clinician's opening.
       setTimeout(() => {
         inject(`${presentation}\n\nChair: convene the council. Have each seated specialist argue their read (search the chart first), then submit via submit_council_output.`);
@@ -373,6 +435,10 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
           ws.send(JSON.stringify({ type: 'FunctionCallResponse', id: fn.id, name: fn.name, content: JSON.stringify(result) }));
         }
       }
+      return;
+    }
+    if (msg.type === 'AgentAudioDone') {
+      void speakPendingLines();
       return;
     }
     if (msg.type === 'Warning') {
@@ -441,6 +507,10 @@ export function getPatientPlanText(): string {
 
 export function closeAgent(): void {
   live.ready = false;
+  if (live.keepAlive) {
+    clearInterval(live.keepAlive);
+    live.keepAlive = null;
+  }
   if (live.ws) {
     try { live.ws.close(); } catch {}
     live.ws = null;
