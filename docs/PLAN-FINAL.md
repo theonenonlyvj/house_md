@@ -29,16 +29,22 @@ is credible** — drama only from real events (a real disagreement, a real empty
 a real coverage reversal); aesthetics stay a calm bright clinical instrument. Never a
 legacy-EHR look, generic chatbot, or theatrical dark-mode AI demo.
 
-1. **The room assembles.** Patient loads from Medplum; the clinician presents by
-   voice; the seating decision renders — who is seated and WHY, and any required
-   specialty that cannot be seated shows as an **empty seat the chair calls out loud**.
+1. **The room assembles.** Patient loads from Medplum; the managing clinician (their
+   own specialty is config — the human fills that seat) presents by voice, then clicks
+   **"Assemble council"** — the explicit entry action that runs the real seating
+   function over chart-derived + presentation-derived features. The table renders —
+   who is seated and WHY, and any required specialty that cannot be seated shows as an
+   **empty seat the chair calls out loud**.
 2. **The board changes its mind.** Specialists argue; Moss retrieval connects
    longitudinal clues; the differential visibly re-ranks and the board shows WHICH
    evidence moved it. Every patient-specific claim carries a Medplum resource ID or is
    visibly labeled general reasoning/conjecture. The clinician challenges, redirects,
    then selects the leading hypothesis.
 3. **Reality checks the plan.** Proposed workup renders; one live Stedi test-mode
-   eligibility call returns; benefits attach to the options they support. Coverage
+   eligibility call returns; **the reimbursement seat speaks it**: a standing patient
+   services / reimbursement persona at the table has "already run" the eligibility
+   check (the live Stedi call powers it) and speaks to what's possible during plan
+   discussion — asserting only facts the current 271 returned. Coverage
    reshapes the plan by **sequencing and flagging**: a referral-gated item visibly
    re-sequences (labs proceed now; the consult is scheduled behind the required PCP
    referral, with its $15 copay fact attached). A covered **alternative** is proposed
@@ -47,23 +53,29 @@ legacy-EHR look, generic chatbot, or theatrical dark-mode AI demo.
    IS the re-sequencing). Out-of-pocket renders **per line item only** (no workup
    total); items without returned rows say "no benefit information returned" — reported
    facts labeled as reported, arithmetic labeled as estimate, never a guarantee.
-4. **The chart remembers.** On explicit confirmation the session writes: what was
-   discussed, what was considered (differential + evidence), the confirmed plan —
-   one R4 `ClinicalImpression` + one draft/proposal `ServiceRequest` per selected
-   item — plus (nice-to-have) a "presenting this to the patient" talking-points
-   section inside the documentation. Every created resource is inspectable as raw
-   JSON. **No patient-facing mode.** Write-back is idempotent within a session.
+4. **The chart remembers.** The clinician clicks **Finalize**: the session writes
+   what was discussed, what was considered (differential + evidence), the confirmed
+   plan — one R4 `ClinicalImpression` + one draft/proposal `ServiceRequest` per
+   selected item — plus a **patient plan-text version** (plain-language "presenting
+   this to the patient" section inside the documentation — REQUIRED, not
+   nice-to-have). Every created resource is inspectable as raw JSON. **No
+   patient-facing mode.** Write-back is idempotent within a session.
 
 ## 3. The council
 
-- **Roster (default config):** chair (internal medicine, moderator) + skeptic +
-  cardiology + nephrology + neurology + clinical pharmacology + endocrinology —
-  **deliberately no hematology**, so the default case's monoclonal-screen need produces
-  a real empty seat from real logic (unit test asserts the seating function requires
-  hematology for Jane Doe's features). All config not code. Each persona: id, name,
-  specialty, argument style, system prompt, voice id. The skeptic's argument style is
-  designed to probe and overreach, so a *warranted* chair challenge emerges reliably
-  without scripting.
+- **Roster:** VIJAY PROVIDES THE FINAL PERSONA LIST BEFORE BUILD. Chair = **House,
+  M.D.** (moderator; name per Vijay — note once: literal TV-character naming in a
+  public judged repo is an IP wink, softening is his call). Standing seats regardless
+  of list: the chair, the skeptic (argument style designed to probe/overreach so a
+  *warranted* chair challenge emerges without scripting), and the **patient services /
+  reimbursement specialist** (speaks the Stedi facts at plan time). Case-driven
+  specialist seats fill from the list. **Constraint the list must preserve:** it must
+  NOT cover every specialty the default case requires — the placeholder default
+  (no hematology, unit-test-asserted required for Jane Doe's features) keeps the
+  empty-seat beat real; if the final list seats hematology, another genuinely-required
+  specialty must be absent. All config not code. Each persona: id, name, specialty,
+  argument style, system prompt, voice id. The managing clinician's own specialty is
+  config and its seat is filled by the human at the table.
 - **Audible:** specialists speak in their own voices, scoped for the video — up to
   **two specialist lines heard aloud per session**; the rest land on the board with
   distinct visual attribution while the chair narrates. The chair is the only entity
@@ -209,13 +221,16 @@ Clinician audio ⇄ Deepgram Voice Agent (managed listen/think/speak + function 
 - **Stedi adapter:** branch explicitly on `aaaErrors[]`/top-level errors (they arrive
   as HTTP 200) → the designed visible-failure state with retry; pre-flight the exact
   `uhc` call 5 minutes before recording.
-- **Whiteboard:** top strip (synthetic patient identity + payer badge + status) ·
-  council edge (seats + reasons + empty seats) · central board (hypothesis lanes,
-  supporting/contradicting evidence, gaps, workup, benefits, FHIR results) · context
-  inspector (click any citation → Medplum resource / raw JSON) · voice dock
-  (transcript caption, listening/speaking state, mic + prerecorded control). Every
-  async operation shows a visible activity state. Reduced-motion respected;
-  projector-readable.
+- **The table (UI):** a virtual round **council table**. Personas sit around it —
+  chair, specialists, the reimbursement seat, the EMPTY seat (visibly vacant chair +
+  why), and the managing clinician's own seat (the human). Speaking state lights the
+  active seat. The **table surface carries the shared data**: evidence cards, the
+  ranked differential, workup items with benefit facts, and finally the created FHIR
+  resources — click anything to inspect (Medplum resource / raw JSON). Top strip:
+  synthetic patient identity + payer badge + session status. Voice dock: transcript
+  caption, listening/speaking state, **push-to-talk** + prerecorded control. Every
+  async operation shows a visible activity state. Calm clinical instrument, not
+  casino felt. Reduced-motion respected; projector-readable.
 
 ### 6.1 Lift map (working code — do not rediscover)
 
@@ -263,10 +278,11 @@ Anthropic key — by design. Node ≥20 (Vijay's machine: prefix
 
 ## 8. Build order and gates (re-clocked from 1:40pm per council review)
 
-**Whiteboard scope, decided now not at 3:30:** ONE screen, one column — seats row →
-ranked differential list with evidence chips → workup list with benefit chips → one
-raw-JSON drawer (lift ResourceDrawer.tsx). No spatial lanes, no canvas. One owner from
-minute one; "polish" is not a schedule line. First 10 minutes: broadcast `.env` +
+**UI scope, decided now not at 3:30:** ONE screen — the council table. Seats
+positioned around a table (plain DOM/CSS, no canvas), center surface = stacked
+regions: evidence cards → ranked differential → workup w/ benefit chips → created
+resources; one raw-JSON drawer (lift ResourceDrawer.tsx). One owner from minute one;
+"polish" is not a schedule line. First 10 minutes: broadcast `.env` +
 one npm-install commit + declare lane→directory ownership (voice-poc's friction log
 records concurrent agents wiping each other's installs).
 
