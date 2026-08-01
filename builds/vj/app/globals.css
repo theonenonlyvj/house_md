@@ -263,43 +263,69 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 .fact-text { color: var(--ink); }
 .fact-date { font-size: 10.5px; color: var(--muted); }
 
-/* the panel, standing at the board */
+/* the panel — fixed cast strip at the top of the room */
 .experts {
   display: flex;
   justify-content: center;
   flex-wrap: wrap;
-  gap: 10px;
-  min-height: 44px;
+  gap: 8px 12px;
+  flex-shrink: 0;
+  padding: 6px 4px 4px;
 }
 
-/* seats: brief-name pills */
+/* seats: avatar + brief label */
 .seat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 10px 20px;
-  font-size: 13px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
+  border-radius: 12px;
+  padding: 8px 10px 7px;
+  min-width: 68px;
   box-shadow: var(--shadow-soft);
-  transition: border-color 160ms ease-out;
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
 }
-.seat.chair {
+.seat-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  overflow: hidden;
+  border: 2px solid var(--line);
+  background: var(--ink);
+  box-shadow: 0 1px 3px rgba(22, 35, 58, 0.12);
+}
+.seat-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.seat-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  color: var(--ink);
+}
+.seat.chair .seat-avatar { border-color: rgba(15, 109, 118, 0.55); }
+.seat.chair .seat-label {
   font-family: var(--serif);
-  font-size: 15px;
-  padding: 11px 26px;
-  border-color: rgba(15, 109, 118, 0.45);
+  font-size: 11px;
   color: var(--teal-deep);
 }
-.seat.reimb { background: var(--brass-soft); border-color: rgba(150, 117, 31, 0.4); color: #7d6420; }
+.seat.reimb { background: var(--brass-soft); border-color: rgba(150, 117, 31, 0.35); }
+.seat.reimb .seat-label { color: #7d6420; }
 .seat.speaking {
   border-color: var(--teal);
-  color: var(--teal-deep);
   box-shadow:
     0 0 0 calc(3px + var(--audio-level) * 14px) rgba(15, 109, 118, calc(0.16 + var(--audio-level) * 0.3)),
     var(--shadow-soft);
 }
-.seat.reimb.speaking { color: var(--teal-deep); }
+.seat.speaking .seat-avatar { border-color: var(--teal); }
+.seat.speaking .seat-label { color: var(--teal-deep); }
+.seat.reimb.speaking .seat-label { color: var(--teal-deep); }
 
 /* ---------- the foot: your seat, and only what the flow needs ---------- */
 .foot {
