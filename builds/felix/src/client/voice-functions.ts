@@ -20,16 +20,21 @@ export function isSessionState(value: unknown): value is SessionState {
 
 export function specialistLinesFor(action: string, value: unknown): SpecialistLine[] {
   if (action !== 'update_differential' || !isSessionState(value)) return [];
-  const audible = new Map(
-    value.seats
-      .filter((seat) => seat.kind === 'specialist' && seat.persona)
-      .map((seat) => [seat.persona!.id, seat.label]),
-  );
-  return value.contributions
-    .flatMap((item) => {
-      const speaker = audible.get(item.personaId);
-      const text = item.leadingInterpretation.text.trim();
-      return speaker && text ? [{ personaId: item.personaId, speaker, text }] : [];
-    })
-    .slice(0, 2);
+  const seats = value.seats.filter((seat) => seat.kind === 'specialist' && seat.persona);
+  const normalize = (text?: string) => (text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  const resolve = (personaId: string) => {
+    const needle = normalize(personaId);
+    return seats.find((seat) => [seat.persona!.id, seat.persona!.name, seat.label, seat.specialty].some((candidate) => normalize(candidate) === needle))
+      ?? seats.find((seat) => needle.includes(normalize(seat.specialty)) || normalize(seat.specialty).includes(needle));
+  };
+  const candidates = value.contributions.flatMap((item) => {
+    const seat = resolve(item.personaId);
+    const text = item.leadingInterpretation.text.trim();
+    return seat?.persona && text ? [{ item, seat, line: { personaId: seat.persona.id, speaker: seat.label, text } }] : [];
+  });
+  const cited = candidates.find(({ item, seat }) => item.leadingInterpretation.grounding === 'record-cited' && seat.specialty !== 'skeptic');
+  const skeptic = candidates.find(({ seat }) => seat.specialty === 'skeptic');
+  const ordered = [cited, skeptic, ...candidates].filter((item): item is NonNullable<typeof item> => Boolean(item));
+  const heard = new Set<string>();
+  return ordered.flatMap(({ line }) => heard.has(line.personaId) ? [] : (heard.add(line.personaId), [line])).slice(0, 2);
 }

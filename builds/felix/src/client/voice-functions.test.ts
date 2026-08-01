@@ -9,13 +9,15 @@ const state = {
   integrations: {},
   seats: [
     { id: 'chair', label: 'House, M.D.', specialty: 'chair', kind: 'chair', reason: '', persona: { id: 'house' } },
+    { id: 'skeptic', label: 'Dr. Rowan Vale', specialty: 'skeptic', kind: 'specialist', reason: '', persona: { id: 'skeptic', name: 'Dr. Rowan Vale' } },
     { id: 'cardiology', label: 'Dr. Sofia Reyes', specialty: 'cardiology', kind: 'specialist', reason: '', persona: { id: 'cardiology' } },
     { id: 'neurology', label: 'Dr. Micah Okafor', specialty: 'neurology', kind: 'specialist', reason: '', persona: { id: 'neurology' } },
   ],
   contributions: [
     { id: 'chair', personaId: 'house', leadingInterpretation: claim },
-    { id: 'cardiology', personaId: 'cardiology', leadingInterpretation: claim },
+    { id: 'cardiology', personaId: 'Cardiology', leadingInterpretation: claim },
     { id: 'neurology', personaId: 'neurology', leadingInterpretation: { ...claim, text: 'Neuropathy broadens the pattern.' } },
+    { id: 'skeptic', personaId: 'Dr. Rowan Vale', leadingInterpretation: { ...claim, text: 'Hypertension remains a credible alternative.' } },
   ],
   differential: [],
   workup: [],
@@ -31,7 +33,7 @@ describe('voice function response routing', () => {
     expect(isSessionState(state)).toBe(true);
     expect(specialistLinesFor('update_differential', state)).toEqual([
       { personaId: 'cardiology', speaker: 'Dr. Sofia Reyes', text: 'Amyloid pattern is plausible.' },
-      { personaId: 'neurology', speaker: 'Dr. Micah Okafor', text: 'Neuropathy broadens the pattern.' },
+      { personaId: 'skeptic', speaker: 'Dr. Rowan Vale', text: 'Hypertension remains a credible alternative.' },
     ]);
   });
 });

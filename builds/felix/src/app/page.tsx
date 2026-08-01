@@ -22,6 +22,7 @@ export default function LivingDifferentialPage() {
   const specialistQueueRef = useRef<SpecialistLine[]>([]);
   const specialistPlaybackRef = useRef(false);
   const specialistEpochRef = useRef(0);
+  const chairSpeakingRef = useRef(false);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/session?id=${SESSION_ID}`, { cache: 'no-store' });
@@ -64,10 +65,11 @@ export default function LivingDifferentialPage() {
   }, []);
 
   const playSpecialists = useCallback(async () => {
-    if (specialistPlaybackRef.current) return;
+    if (specialistPlaybackRef.current || chairSpeakingRef.current) return;
     const player = playerRef.current;
     if (!player) return;
     const epoch = specialistEpochRef.current;
+    let deferredToChair = false;
     specialistPlaybackRef.current = true;
     try {
       while (specialistQueueRef.current.length && specialistEpochRef.current === epoch) {
@@ -82,6 +84,12 @@ export default function LivingDifferentialPage() {
         }
         const pcm = await response.arrayBuffer();
         if (pcm.byteLength === 0) throw new Error('Specialist voice returned empty audio.');
+        if (chairSpeakingRef.current) {
+          specialistQueueRef.current.unshift(line);
+          setActivePersona('');
+          deferredToChair = true;
+          break;
+        }
         player.queue(pcm);
         await delay(Math.ceil(player.getRemainingPlaybackTime() * 1_000) + 75);
       }
@@ -89,7 +97,7 @@ export default function LivingDifferentialPage() {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
       specialistPlaybackRef.current = false;
-      if (specialistEpochRef.current === epoch) {
+      if (specialistEpochRef.current === epoch && !deferredToChair) {
         setActivePersona('');
         setVoice('ready');
         setCaption('Council voices complete. The clinician remains in control.');
@@ -133,7 +141,12 @@ export default function LivingDifferentialPage() {
         } else if (isSessionState(value)) {
           setState(value);
           const lines = specialistLinesFor(call.name, value);
-          if (lines.length) specialistQueueRef.current = lines;
+          if (lines.length) {
+            specialistQueueRef.current = lines;
+            // Deepgram can emit AgentAudioDone before the structured tool call.
+            // This fallback complements the event path without overlapping the chair.
+            window.setTimeout(() => void playSpecialists(), 4_000);
+          }
         }
         session.sendFunctionCallResponse(call.id, call.name, JSON.stringify(result));
       } catch (reason) {
@@ -142,13 +155,14 @@ export default function LivingDifferentialPage() {
         session.sendFunctionCallResponse(call.id, call.name, JSON.stringify({ error: message }));
       }
     }
-  }, []);
+  }, [playSpecialists]);
 
   const connectVoice = useCallback(async () => {
     microphoneRef.current?.stop();
     microphoneRef.current = null;
     sessionRef.current?.disconnect();
     playerRef.current?.dispose();
+    chairSpeakingRef.current = false;
     setVoice('connecting');
     setError('');
     setCaption('Opening a direct Deepgram voice session…');
@@ -180,9 +194,10 @@ export default function LivingDifferentialPage() {
       if (text) setCaption(text);
       if (message.role === 'user' && text) setState((current) => current ? { ...current, transcript: text } : current);
     });
-    session.on('user-started-speaking', () => { flushSpecialists(); setVoice('listening'); });
-    session.on('agent-started-speaking', () => setVoice('speaking'));
+    session.on('user-started-speaking', () => { chairSpeakingRef.current = false; flushSpecialists(); setVoice('listening'); });
+    session.on('agent-started-speaking', () => { chairSpeakingRef.current = true; setVoice('speaking'); });
     session.on('agent-audio-done', () => {
+      chairSpeakingRef.current = false;
       const playbackDelay = Math.ceil(player.getRemainingPlaybackTime() * 1_000);
       window.setTimeout(() => {
         if (sessionRef.current !== session) return;
