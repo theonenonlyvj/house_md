@@ -365,6 +365,20 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   border-color: #7f2c31;
   box-shadow: 0 2px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
 }
+.ptt.talking:hover:not(:disabled),
+.ptt.talking:active:not(:disabled) {
+  background: var(--bad);
+  border-color: #7f2c31;
+  box-shadow: 0 2px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
+}
+.ptt.talking:active:not(:disabled) {
+  transform: translateY(1px);
+  box-shadow: 0 1px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
+}
+.ptt.talking:focus-visible {
+  outline: 2px solid #7f2c31;
+  outline-offset: 2px;
+}
 .ptt.talking .avatar { color: var(--bad); }
 @media (prefers-reduced-motion: no-preference) {
   .ptt.talking { animation: listening 1.4s ease-in-out infinite; }
