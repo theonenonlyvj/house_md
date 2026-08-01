@@ -386,10 +386,28 @@ export default function Page() {
             <div className="row">
               <button
                 className="primary"
-                disabled={!(s.phase === 'benefits-ready' || s.phase === 'workup-ready')}
+                disabled={
+                  !s.selectedHypothesisId ||
+                  s.workup.filter((o) => o.selected).length === 0 ||
+                  !(s.phase === 'benefits-ready' || s.phase === 'workup-ready')
+                }
+                title={
+                  !s.selectedHypothesisId
+                    ? 'Select the leading diagnosis first'
+                    : s.workup.length === 0
+                      ? 'The council must propose a workup first'
+                      : 'Write the confirmed plan to the chart'
+                }
                 onClick={finalize}
               >
                 ✅ Finalize → write to chart
+                <span className="hint">
+                  {!s.selectedHypothesisId
+                    ? 'locked — select the leading diagnosis first'
+                    : s.workup.length === 0
+                      ? 'locked — plan not proposed yet'
+                      : 'diagnosis + plan agreed — ready to write'}
+                </span>
               </button>
             </div>
             {finalized && <div className={finalized.startsWith('Wrote') ? 'activity' : 'errorbox'}>{finalized}</div>}
