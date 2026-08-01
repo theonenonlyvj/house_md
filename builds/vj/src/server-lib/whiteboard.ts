@@ -59,6 +59,7 @@ Return ONE raw SVG document and nothing else — no prose, no markdown fence.
 Hard requirements:
 - <svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"> — every element inside those bounds, nothing clipped.
 - Background: corkboard (warm brown, subtle grain via a few <circle> speckles or a <pattern>).
+- The patient card is always pinned top-left and always readable: name in bold, then "age · sex · DOB", then the chief complaint in quotes, verbatim. It is the only header the board gets.
 - Evidence as pinned index cards / photos: white-ish <rect> with a slight rotate() transform, a red pushpin <circle>, short readable text (12-15px, sans-serif, dark ink). Wrap long text yourself across <tspan> lines; never let text overflow its card.
 - Red string: <path>/<line> in crimson connecting cards that relate — supporting evidence to its diagnosis, contradictions in a dashed line, workup hanging off the leading diagnosis. Draw the string BEHIND the cards.
 - The leading diagnosis is the visual centre: bigger card, red marker circle around it.
@@ -74,7 +75,8 @@ ${prev ? `
 This is the board as it currently hangs. Do NOT start over: keep every existing card in
 place with its wording, position and rotation, and change only what the notes above
 changed — pin the new cards into free space, run string from them to what they relate to,
-re-mark the leading diagnosis if it moved. If the canvas size above differs from this
+re-mark the leading diagnosis if it moved. One exception to "leave cards alone": if the
+patient card does not yet follow the patient-card rule above, redraw that card so it does. If the canvas size above differs from this
 SVG's, rescale the layout to the new size. Return the complete updated SVG.
 
 ${prev}` : ''}`;

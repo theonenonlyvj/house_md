@@ -387,13 +387,16 @@ export default function Page() {
             )}
             {s.patient && (
               <>
-                <div className="wb-patient">
-                  <div className="case-name">{s.patient.name}</div>
-                  <div className="case-meta">
-                    {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
+                {/* The board pins the patient card itself — no header above it. */}
+                {!boardUp && (
+                  <div className="wb-patient">
+                    <div className="case-name">{s.patient.name}</div>
+                    <div className="case-meta">
+                      {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
+                    </div>
+                    {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
                   </div>
-                  {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
-                </div>
+                )}
 
                 <div className="wb-body">
                 {yourMove && <div className="yourmove">{yourMove}</div>}
