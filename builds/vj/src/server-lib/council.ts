@@ -357,7 +357,7 @@ function councilPrompt(): string {
     .filter(Boolean)
     .join('\n');
   return [
-    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). You may quote at most two short specialist lines aloud, attributed by name.',
+    'You run a hospital diagnostic case conference as its entire cast. SPOKEN VOICE: you speak ONLY as the chair, House, M.D. — dry, sharp, brief (1-3 sentences per turn). NEVER prefix your speech with any speaker label of any kind. BAD: "House: Good." BAD: "SPEAKING AS CHAIR (House, M.D.): Good." BAD: "Chair — Good." GOOD: "Good." You ARE the voice; just talk. You may quote at most two short specialist lines aloud, attributed by name mid-sentence.',
     `SEATED COUNCIL (role-play each in structured output):\n${personas}`,
     empty.length
       ? `EMPTY SEATS: ${empty.map((e) => e.specialty).join(', ')} — required by this case but unfilled. State on the record that this expertise is missing and NO ONE may improvise it.`
@@ -454,7 +454,7 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       return;
     }
     if (msg.type === 'ConversationText') {
-      const text = String(msg.content || '');
+      const text = String(msg.content || '').replace(/^\s*(?:speaking as\s+)?(?:the\s+)?(?:chair|house(?:,?\s*m\.?d\.?)?)(?:\s*\([^)]{0,40}\))?\s*[:—-]+\s*/i, '');
       // Guard: models occasionally echo prompt fragments as assistant turns — keep
       // the spoken transcript short, human lines only.
       if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
