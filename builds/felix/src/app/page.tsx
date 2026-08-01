@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
 import { AgentMicrophone, AgentPlayer, AgentSession, type FunctionCallRequestMessage } from '@deepgram/agents';
 import { AGENT_SETTINGS } from '@/client/voice-agent';
+import { isSessionState, specialistLinesFor, type SpecialistLine } from '@/client/voice-functions';
 import type { Claim, CreatedResource, EvidenceItem, IntegrationName, Seat, SessionState, WorkupItem } from '@/domain/types';
 
 const SESSION_ID = 'demo-session';
@@ -18,8 +19,9 @@ export default function LivingDifferentialPage() {
   const sessionRef = useRef<AgentSession | null>(null);
   const microphoneRef = useRef<AgentMicrophone | null>(null);
   const playerRef = useRef<AgentPlayer | null>(null);
-  const specialistQueueRef = useRef<Array<{ personaId: string; text: string }>>([]);
-  const specialistAudioRef = useRef<HTMLAudioElement | null>(null);
+  const specialistQueueRef = useRef<SpecialistLine[]>([]);
+  const specialistPlaybackRef = useRef(false);
+  const specialistEpochRef = useRef(0);
 
   const refresh = useCallback(async () => {
     const response = await fetch(`/api/session?id=${SESSION_ID}`, { cache: 'no-store' });
@@ -55,31 +57,44 @@ export default function LivingDifferentialPage() {
   }, []);
 
   const flushSpecialists = useCallback(() => {
+    specialistEpochRef.current += 1;
     specialistQueueRef.current = [];
-    if (specialistAudioRef.current) {
-      specialistAudioRef.current.pause();
-      specialistAudioRef.current.src = '';
-      specialistAudioRef.current = null;
-    }
+    playerRef.current?.interrupt();
     setActivePersona('');
   }, []);
 
   const playSpecialists = useCallback(async () => {
-    while (specialistQueueRef.current.length) {
-      const line = specialistQueueRef.current.shift()!;
-      setActivePersona(line.personaId);
-      setVoice('speaking');
-      const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(line) });
-      if (!response.ok) { setError((await response.json()).error ?? 'Specialist voice failed.'); break; }
-      const url = URL.createObjectURL(await response.blob());
-      const audio = new Audio(url);
-      specialistAudioRef.current = audio;
-      await new Promise<void>((resolve) => { audio.onended = () => resolve(); audio.onerror = () => resolve(); audio.play().catch(() => resolve()); });
-      URL.revokeObjectURL(url);
-      if (specialistAudioRef.current === audio) specialistAudioRef.current = null;
+    if (specialistPlaybackRef.current) return;
+    const player = playerRef.current;
+    if (!player) return;
+    const epoch = specialistEpochRef.current;
+    specialistPlaybackRef.current = true;
+    try {
+      while (specialistQueueRef.current.length && specialistEpochRef.current === epoch) {
+        const line = specialistQueueRef.current.shift()!;
+        setActivePersona(line.personaId);
+        setVoice('speaking');
+        setCaption(`${line.speaker}: ${line.text}`);
+        const response = await fetch('/api/speak', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(line) });
+        if (!response.ok) {
+          const value = await response.json().catch(() => ({ error: 'Specialist voice failed.' })) as { error?: string };
+          throw new Error(value.error ?? 'Specialist voice failed.');
+        }
+        const pcm = await response.arrayBuffer();
+        if (pcm.byteLength === 0) throw new Error('Specialist voice returned empty audio.');
+        player.queue(pcm);
+        await delay(Math.ceil(player.getRemainingPlaybackTime() * 1_000) + 75);
+      }
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      specialistPlaybackRef.current = false;
+      if (specialistEpochRef.current === epoch) {
+        setActivePersona('');
+        setVoice('ready');
+        setCaption('Council voices complete. The clinician remains in control.');
+      }
     }
-    setActivePersona('');
-    setVoice('ready');
   }, []);
 
   const handleFunctionCalls = useCallback(async (message: FunctionCallRequestMessage, session: AgentSession) => {
@@ -103,20 +118,24 @@ export default function LivingDifferentialPage() {
             ? { id: SESSION_ID, query: args.query }
             : { id: SESSION_ID, action: call.name, payload: args }),
         });
-        const value = await response.json() as SessionState & { error?: string };
-        if (!response.ok) throw new Error(value.error || `${call.name} failed`);
-        setState(value);
-        const result = evidenceSearch
-          ? {
-              query: value.evidenceSearch?.query,
-              scanned: value.evidenceSearch?.scanned,
-              hits: value.evidence.map(({ alias, resourceType, title, summary, date }) => ({ alias, resourceType, title, summary, date })),
-            }
-          : value;
-        session.sendFunctionCallResponse(call.id, call.name, JSON.stringify(result));
-        if (call.name === 'update_differential') {
-          specialistQueueRef.current = value.contributions.slice(0, 2).map((item) => ({ personaId: item.personaId, text: item.leadingInterpretation.text }));
+        const value = await response.json() as unknown;
+        const apiError = value && typeof value === 'object' && 'error' in value ? String(value.error) : '';
+        if (!response.ok) throw new Error(apiError || `${call.name} failed`);
+        let result = value;
+        if (evidenceSearch) {
+          if (!isSessionState(value)) throw new Error('Evidence search returned an invalid session state.');
+          setState(value);
+          result = {
+            query: value.evidenceSearch?.query,
+            scanned: value.evidenceSearch?.scanned,
+            hits: value.evidence.map(({ alias, resourceType, title, summary, date }) => ({ alias, resourceType, title, summary, date })),
+          };
+        } else if (isSessionState(value)) {
+          setState(value);
+          const lines = specialistLinesFor(call.name, value);
+          if (lines.length) specialistQueueRef.current = lines;
         }
+        session.sendFunctionCallResponse(call.id, call.name, JSON.stringify(result));
       } catch (reason) {
         const message = reason instanceof Error ? reason.message : String(reason);
         setError(message);
@@ -161,7 +180,7 @@ export default function LivingDifferentialPage() {
       if (text) setCaption(text);
       if (message.role === 'user' && text) setState((current) => current ? { ...current, transcript: text } : current);
     });
-    session.on('user-started-speaking', () => { player.interrupt(); flushSpecialists(); setVoice('listening'); });
+    session.on('user-started-speaking', () => { flushSpecialists(); setVoice('listening'); });
     session.on('agent-started-speaking', () => setVoice('speaking'));
     session.on('agent-audio-done', () => {
       const playbackDelay = Math.ceil(player.getRemainingPlaybackTime() * 1_000);
@@ -200,7 +219,6 @@ export default function LivingDifferentialPage() {
       } else {
         microphoneRef.current.unmute();
       }
-      playerRef.current?.interrupt();
       flushSpecialists();
       setVoice('listening');
       setCaption('Listening… release when finished.');
@@ -251,6 +269,7 @@ export default function LivingDifferentialPage() {
   }, [api]);
 
   if (!state) return <main className="loading-shell" aria-busy="true"><div className="loading-line" /><p>Loading the synthetic patient record from Medplum…</p></main>;
+  const activeSpeaker = state.seats.find((seat) => seat.persona?.id === activePersona)?.label;
 
   return (
     <main className="app-shell">
@@ -310,7 +329,7 @@ export default function LivingDifferentialPage() {
 
       <footer className="voice-dock">
         <div className={`voice-orb voice-${voice}`} aria-hidden="true"><span /></div>
-        <div className="caption"><strong>{voiceLabel(voice)}</strong><p>{caption}</p></div>
+        <div className="caption"><strong>{activeSpeaker ? `${activeSpeaker} speaking` : voiceLabel(voice)}</strong><p>{caption}</p></div>
         <div className="voice-actions">
           {voice === 'offline' || voice === 'error' ? <button className="primary" onClick={connectVoice}>Connect voice room</button> : <>
             <button className="secondary" disabled={voice !== 'ready' || busy !== ''} onClick={feedPrerecorded}>{busy === 'prerecorded' ? 'Streaming audio…' : 'Play reviewed case audio'}</button>
