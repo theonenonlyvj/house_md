@@ -19,10 +19,25 @@ Vijay Ram, Thai Nguyen, Noah Landesberg, and Felix Wotschofsky.
 
 ## Build status
 
-The repository contains verified standalone PoCs (`stedi-poc/` eligibility, `voice-poc/`
-Deepgram agent + Moss retrieval) and the canonical plan for the application now being
-built in `app/`. See the integration-truth table in `docs/PLAN-FINAL.md`; do not infer
-completion from the presence of design documentation.
+**Golden path complete (verified live 3:10pm):** the working build is `builds/vj/`.
+Hosted-Medplum chart in → deterministic council seating (real empty seat, spoken) →
+live debate on Deepgram's managed model with code-enforced cited-or-conjecture →
+audible specialist voices + push-to-talk clinician mic → Moss semantic retrieval →
+one live Stedi test-mode eligibility check re-sequencing the plan → idempotent
+FHIR write-back (`ClinicalImpression` + draft `ServiceRequest`s) inspectable as raw
+JSON. Standalone PoCs that fed it: `stedi-poc/`, `voice-poc/`.
+
+Run it:
+
+```bash
+cd builds/vj
+PATH="/opt/homebrew/opt/node/bin:$PATH" npm install   # plain `npm install` off Vijay's machine
+PATH="/opt/homebrew/opt/node/bin:$PATH" node server.js # custom server (Next + WS relay)
+# open http://localhost:3000 — enable chair audio, Assemble council, hold 🎙 to speak
+```
+
+Keys live in the repo-root `.env` (see below); with no keys, provider calls surface
+visible failure states — nothing is silently canned.
 
 ## Getting started
 
