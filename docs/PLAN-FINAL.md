@@ -193,9 +193,14 @@ Clinician audio ⇄ Deepgram Voice Agent (managed listen/think/speak + function 
   next handler + a `ws` upgrade path for the browser⇄Deepgram relay lifted verbatim
   from voice-poc). Next.js route handlers **cannot** accept WebSocket upgrades — do
   not attempt to port the relay into a route. Still one application (§1 stands).
-- **Model stack:** pin the verified stack for the recording — managed `gpt-4o-mini`
-  think + `nova-3` listen + Aura-2 voices (all live-verified today). Flux (STT/TTS,
-  Early Access) only if acceptance is green with time to spare. Wait for
+- **Model stack:** think = managed `gpt-5-mini` (OpenAI via Deepgram, Standard tier, no
+  separate key) — chosen for latency + the `reasoning_mode` knob (OpenAI 5.x family
+  only; Claude/Gemini managed expose no equivalent): `low` for spoken specialist
+  lines (latency-critical), `medium` for the chair's differential synthesis
+  (quality-critical). Wire `think` as a fallback array (`gpt-5-mini` →
+  `claude-haiku-4-5` → `gpt-4o-mini`) so a single model hiccup doesn't kill a turn.
+  Listen = `nova-3`, voices = Aura-2 (all live-verified today). Flux (STT/TTS, Early
+  Access) only if acceptance is green with time to spare. Wait for
   SettingsApplied before streaming; declared audio format must match actual bytes.
 - **Prerecorded-input feeder (build in step 1, ~20 lines):** read WAV → strip header →
   stream 40ms linear16 chunks at real-time pace → trailing 1–2s silence, reusing the
