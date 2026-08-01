@@ -1,9 +1,11 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Argument, SessionState } from '../src/shared/types';
+import type { Argument, ConversationTurn, Seat, SessionState } from '../src/shared/types';
 
 // The council table. Decision support, not diagnosis: the council argues, the
 // clinician decides — and clicks every consequential transition themselves.
+// Layout: House at the head, specialists flank the table, the clinician's seat
+// at the foot IS the push-to-talk control. Right rail: transcript + plan.
 
 type S = SessionState & { version: number };
 
@@ -101,18 +103,39 @@ function usePushToTalk() {
   return { talking, start, stop };
 }
 
-// Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
+// Presentation helpers (no logic): avatar initials + seat role per persona/seat data.
+// Role detection reads seat data, never the roster — personas stay swappable.
 function initials(name?: string): string {
   if (!name) return '·';
   const words = name.replace(/\(.*?\)/g, '').split(/[\s,]+/).filter((w) => w && !/^(Dr|Ms|Mr|Mrs|M\.?D)\.?$/i.test(w));
   return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || name[0].toUpperCase();
 }
-function seatClass(seat: { status: string; personaId?: string }): string {
-  if (seat.status === 'empty') return 'seat empty';
-  if (seat.status === 'human') return 'seat human';
-  if (seat.personaId === 'chair-house') return 'seat chair';
-  if (seat.personaId === 'reimbursement') return 'seat reimb';
-  return 'seat';
+
+type SeatRole = 'chair' | 'human' | 'reimb' | 'empty' | 'specialist';
+function seatRole(seat: Seat): SeatRole {
+  if (seat.status === 'empty') return 'empty';
+  if (seat.status === 'human') return 'human';
+  if (seat.personaId === 'chair-house' || seat.reasons[0] === 'moderates every council') return 'chair';
+  if (seat.specialty === 'reimbursement') return 'reimb';
+  return 'specialist';
+}
+
+function SeatCard({ seat, speaking }: { seat: Seat; speaking: boolean }) {
+  const role = seatRole(seat);
+  const shortName = seat.personaName?.replace(/\s*\(.*?\)/g, '');
+  return (
+    <div
+      className={`seat ${role}${speaking ? ' speaking' : ''}`}
+      title={[seat.personaName, ...seat.reasons].filter(Boolean).join(' · ')}
+    >
+      <div className="avatar">{role === 'empty' ? '?' : initials(seat.personaName)}</div>
+      <div className="meta">
+        <div className="who">{role === 'empty' ? 'Empty seat' : shortName}</div>
+        <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
+        <div className="why">{seat.reasons[0]}</div>
+      </div>
+    </div>
+  );
 }
 
 function ClaimLine({ a, onCite }: { a: Argument; onCite: (rt: string, id: string) => void }) {
@@ -171,214 +194,253 @@ export default function Page() {
     if (res.ok) setCreated(data.created || []);
   }, [s]);
 
-  if (!s) return <div className="footer-note">loading…</div>;
+  if (!s) return <div className="loading">loading…</div>;
 
   const seats = s.seating?.seats || [];
-  const n = seats.length;
+  const chairSeat = seats.find((st) => seatRole(st) === 'chair');
+  const sideSeats = seats.filter((st) => st !== chairSeat && st.status !== 'human');
+  const half = Math.ceil(sideSeats.length / 2);
+  const leftSeats = sideSeats.slice(0, half);
+  const rightSeats = sideSeats.slice(half);
   const canAssemble = s.phase === 'case-ready' || s.phase === 'recoverable-error';
+  const canFinalize = s.phase === 'benefits-ready' || s.phase === 'workup-ready';
+  const leading = s.differential.find((d) => d.status === 'leading');
+  const allCreated = [...created, ...s.createdResources];
+
+  // Who has the floor: the seat behind the most recent non-clinician turn, if fresh.
+  const lastTurn = s.transcript[s.transcript.length - 1];
+  const floorTurn = lastTurn && lastTurn.role !== 'clinician' && Date.now() - lastTurn.at < 8000 ? lastTurn : null;
+  const hasFloor = (seat: Seat) =>
+    !!floorTurn &&
+    (seat.personaId === floorTurn.personaId || (floorTurn.role === 'chair' && seatRole(seat) === 'chair'));
+
+  const chairName = chairSeat?.personaName || 'Chair';
+  const turnParts = (t: ConversationTurn): { who: string; said: string } => {
+    if (t.role === 'specialist') {
+      const i = t.text.indexOf(': ');
+      if (i > 0 && i < 48) return { who: t.text.slice(0, i), said: t.text.slice(i + 2) };
+      return { who: 'specialist', said: t.text };
+    }
+    if (t.role === 'chair') return { who: chairName, said: t.text };
+    if (t.role === 'clinician') return { who: 'You', said: t.text };
+    return { who: 'system', said: t.text };
+  };
 
   return (
-    <>
-      <div className="topstrip">
+    <div className="app">
+      <header className="masthead">
         <span className="name">house_md</span>
         <span className="subname">Council of Peers</span>
         {s.patient && (
           <>
             <span className="patient">{s.patient.name} · DOB {s.patient.dob}</span>
-            <span className="badge syn">SYNTHETIC DATA</span>
+            <span className="badge syn">Synthetic data</span>
             <span className="badge">{s.patient.payer}</span>
           </>
         )}
-        <span className="badge phase">{s.phase}</span>
+        <span className="badge phase">{s.phase.replace(/-/g, ' ')}</span>
         {s.activity && <span className="activity">{s.activity}</span>}
-        <span style={{ flex: 1 }} />
-        <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 chair audio on' : '🔇 enable chair audio'}</button>
-        <span className="tagline">the council argues, the clinician decides</span>
-      </div>
+        <span className="spacer" />
+        <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 Chair audio on' : '🔇 Enable chair audio'}</button>
+      </header>
 
-      <div className="stage">
-        <div className="table-wrap">
-          <div className="table-surface" />
-          {seats.map((seat, i) => {
-            const angle = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
-            const x = 50 + 44 * Math.cos(angle);
-            const y = 50 + 44 * Math.sin(angle);
-            return (
-              <div
-                key={`${seat.specialty}-${seat.status}-${i}`}
-                className={seatClass(seat)}
-                style={{ left: `calc(${x}% - 79px)`, top: `calc(${y}% - 44px)` }}
-                title={seat.reasons.join(' · ')}
-              >
-                <div className="avatar">
-                  {seat.status === 'empty' ? '?' : seat.status === 'human' ? 'YOU' : initials(seat.personaName)}
+      <div className="main">
+        <section className="chamber">
+          <div className="head-row">
+            {chairSeat && <SeatCard seat={chairSeat} speaking={hasFloor(chairSeat)} />}
+          </div>
+
+          <div className="table-zone">
+            <div className="table-surface" />
+            <div className="side">
+              {leftSeats.map((seat, i) => (
+                <SeatCard key={`l-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
+              ))}
+            </div>
+
+            <div className="board">
+              {s.differential.length === 0 && s.contributions.length === 0 && (
+                <div className="placeholder">
+                  {s.phase === 'case-ready'
+                    ? 'The table is set. Assemble the council to begin.'
+                    : 'The council is working — arguments land here with citations.'}
                 </div>
-                <div className="who">{seat.status === 'empty' ? 'EMPTY SEAT' : seat.personaName}</div>
-                <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
-                <div className="why">{seat.reasons[0]}</div>
-              </div>
-            );
-          })}
+              )}
 
-          <div className="center">
-            {s.differential.length === 0 && (
-              <div className="placeholder">
-                {s.phase === 'case-ready'
-                  ? 'Load the case, then assemble the council.'
-                  : 'The council is working — arguments land here with citations.'}
-              </div>
-            )}
-
-            {s.differential.length > 0 && (
-              <>
-                <h3>Differential <span className="sub">every claim cited or labeled conjecture</span></h3>
-                {s.differential.map((d) => (
-                  <div key={d.id} className={`dx ${d.status === 'leading' ? 'leading' : ''}`}>
-                    <div className="head">
-                      <span className="rank">{d.rank}</span>
-                      <span className="title">{d.display}</span>
-                      <span style={{ flex: 1 }} />
-                      {s.phase !== 'case-ready' && (
-                        <button disabled={d.status === 'leading'} onClick={() => post('/api/session/select', { id: d.id })}>
-                          {d.status === 'leading' ? 'leading' : 'select as leading'}
-                        </button>
-                      )}
-                    </div>
-                    <div className="assessment">{d.assessment}</div>
-                    {d.supporting.map((a, i) => <ClaimLine key={`s${i}`} a={a} onCite={openCite} />)}
-                    {d.contradicting.map((a, i) => (
-                      <div key={`c${i}`} className="claim">
-                        <span className="chip contra">against</span> <ClaimLine a={a} onCite={openCite} />
-                      </div>
-                    ))}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {s.contributions.length > 0 && (
-              <>
-                <h3>Council positions</h3>
-                {s.contributions.map((c, i) => (
-                  <div key={i} className="dx">
-                    <div className="head"><span className="title">{c.specialty.replace(/-/g, ' ')}</span></div>
-                    <ClaimLine a={c.interpretation} onCite={openCite} />
-                    {c.contradiction && (
-                      <div className="claim"><span className="chip contra">but</span> <ClaimLine a={c.contradiction} onCite={openCite} /></div>
-                    )}
-                    {c.discriminator && <div className="claim">→ discriminator: {c.discriminator}</div>}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {s.workup.length > 0 && (
-              <>
-                <h3>Proposed workup <span className="sub">coverage attached where the payer answered</span></h3>
-                {s.workup.map((o) => (
-                  <div key={o.id} className="opt">
-                    <div className="title">{o.display} <span className="badge">{o.priority}</span></div>
-                    <div className="purpose">{o.purpose}</div>
-                    {o.sequenceNote && <div className="seq">⇄ {o.sequenceNote}</div>}
-                    {o.benefit && (
-                      <div className="ben">
-                        <div className="ben-label">Coverage facts</div>
-                        {o.benefit.matched ? (
-                          <>
-                            plan {o.benefit.planActive ? 'ACTIVE' : 'INACTIVE'}
-                            {o.benefit.copay && <> · copay <span className="money">{o.benefit.copay}</span></>}
-                            {o.benefit.deductibleRemaining && <> · deductible left <span className="money">{o.benefit.deductibleRemaining}</span></>}
-                            {o.benefit.oopRemaining && <> · OOP left <span className="money">{o.benefit.oopRemaining}</span></>}
-                            {o.benefit.messages.map((m, i) => <div key={i}>payer: “{m}”</div>)}
-                            <div className="caveat">(reported by payer test response — estimate, not a guarantee)</div>
-                          </>
-                        ) : (
-                          <span className="caveat">no service-specific benefit information returned</span>
+              {s.differential.length > 0 && (
+                <>
+                  <h3>Living differential <span className="sub">every claim cited or labeled conjecture</span></h3>
+                  {s.differential.map((d) => (
+                    <div key={d.id} className={`dx ${d.status === 'leading' ? 'leading' : ''}`}>
+                      <div className="head">
+                        <span className="rank">{d.rank}</span>
+                        <span className="title">{d.display}</span>
+                        <span className="spacer" />
+                        {s.phase !== 'case-ready' && (
+                          <button disabled={d.status === 'leading'} onClick={() => post('/api/session/select', { id: d.id })}>
+                            {d.status === 'leading' ? 'leading' : 'select as leading'}
+                          </button>
                         )}
                       </div>
-                    )}
-                  </div>
-                ))}
-              </>
-            )}
-
-            {(created.length > 0 || s.createdResources.length > 0) && (
-              <>
-                <h3>Written to chart — click to inspect the real FHIR</h3>
-                <div>
-                  {[...created, ...s.createdResources].map((r) => (
-                    <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
-                      {r.resourceType}/{r.id.slice(0, 8)}…
-                    </span>
+                      <div className="assessment">{d.assessment}</div>
+                      {d.supporting.map((a, i) => <ClaimLine key={`s${i}`} a={a} onCite={openCite} />)}
+                      {d.contradicting.map((a, i) => (
+                        <div key={`c${i}`} className="claim">
+                          <span className="chip contra">against</span> <ClaimLine a={a} onCite={openCite} />
+                        </div>
+                      ))}
+                    </div>
                   ))}
-                </div>
-              </>
-            )}
-          </div>
-        </div>
+                </>
+              )}
 
-        <div className="rail">
-          <div className="controls">
-            <div className="rail-label">Chair’s bench</div>
-            <div className="row">
-              <button className="primary" disabled={!canAssemble} onClick={() => post('/api/session/assemble')}>
-                🩺 Assemble council
-              </button>
-              <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
+              {s.contributions.length > 0 && (
+                <>
+                  <h3>Council positions</h3>
+                  {s.contributions.map((c, i) => (
+                    <div key={i} className="dx">
+                      <div className="head"><span className="title">{c.specialty.replace(/-/g, ' ')}</span></div>
+                      <ClaimLine a={c.interpretation} onCite={openCite} />
+                      {c.contradiction && (
+                        <div className="claim"><span className="chip contra">but</span> <ClaimLine a={c.contradiction} onCite={openCite} /></div>
+                      )}
+                      {c.discriminator && <div className="claim">→ discriminator: {c.discriminator}</div>}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
-            <button
-              className={`primary ptt ${ptt.talking ? 'talking' : ''}`}
-              disabled={s.phase === 'case-ready'}
-              onPointerDown={ptt.start}
-              onPointerUp={ptt.stop}
-              onPointerLeave={ptt.stop}
-            >
-              {ptt.talking ? '🎙 LISTENING' : '🎙 HOLD to speak to the council'}
-              <span className="hint">{ptt.talking ? 'release when done' : 'press and hold — you are at the table'}</span>
-            </button>
-            <div className="row">
-              <input
-                type="text"
-                placeholder="…or type your interjection"
-                value={text}
-                onChange={(e) => setText(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && text.trim()) { post('/api/session/say', { text }); setText(''); }
-                }}
-              />
-              <button onClick={() => { if (text.trim()) { post('/api/session/say', { text }); setText(''); } }}>say</button>
+
+            <div className="side">
+              {rightSeats.map((seat, i) => (
+                <SeatCard key={`r-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
+              ))}
             </div>
-            <div className="row">
+          </div>
+
+          <div className="dock">
+            <div className="dock-row">
+              <div className="dock-group">
+                <button className={canAssemble ? 'primary' : ''} disabled={!canAssemble} onClick={() => post('/api/session/assemble')}>
+                  🩺 Assemble council
+                </button>
+                <button onClick={() => { post('/api/session/reset'); setFinalized(null); setCreated([]); }}>Reset</button>
+              </div>
+
               <button
-                className="primary"
-                disabled={!(s.phase === 'benefits-ready' || s.phase === 'workup-ready')}
-                onClick={finalize}
+                className={`ptt${ptt.talking ? ' talking' : ''}`}
+                disabled={s.phase === 'case-ready'}
+                onPointerDown={ptt.start}
+                onPointerUp={ptt.stop}
+                onPointerLeave={ptt.stop}
               >
-                ✅ Finalize → write to chart
+                <span className="avatar">YOU</span>
+                <span className="ptt-text">
+                  <span className="ptt-label">{ptt.talking ? '🎙 Listening — release when done' : '🎙 Hold to speak to the council'}</span>
+                  <span className="ptt-sub">your seat, at the foot of the table</span>
+                </span>
               </button>
+
+              <div className="dock-group grow">
+                <input
+                  type="text"
+                  placeholder="…or type your interjection"
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && text.trim()) { post('/api/session/say', { text }); setText(''); }
+                  }}
+                />
+                <button onClick={() => { if (text.trim()) { post('/api/session/say', { text }); setText(''); } }}>Say</button>
+                <button className={canFinalize ? 'primary' : ''} disabled={!canFinalize} onClick={finalize}>
+                  ✅ Finalize → chart
+                </button>
+              </div>
             </div>
-            {finalized && <div className={finalized.startsWith('Wrote') ? 'activity' : 'errorbox'}>{finalized}</div>}
+            {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
             {s.error && (
               <div className="errorbox">
                 {s.error}{' '}
                 <button onClick={() => post('/api/session/assemble')}>retry</button>
               </div>
             )}
-            <div className="guide">
-              <b>1</b> Assemble · <b>2</b> Council argues — listen · <b>3</b> Hold to speak (or type) ·{' '}
-              <b>4</b> Select the leading dx · <b>5</b> Review coverage · <b>6</b> Finalize
+            <div className="smallprint">
+              <b>1</b> Assemble · <b>2</b> Listen · <b>3</b> Hold to speak · <b>4</b> Select leading dx · <b>5</b> Review plan ·{' '}
+              <b>6</b> Finalize&ensp;—&ensp;synthetic data only · decision support, not diagnosis: the council argues, the clinician decides
             </div>
           </div>
+        </section>
 
-          <div className="transcript" ref={transcriptRef}>
-            {s.transcript.map((t, i) => (
-              <div key={i} className={`turn ${t.role}`}>
-                <div className="who">{t.role === 'chair' ? 'House, M.D. (chair)' : t.role}</div>
-                <div className="said">{t.text}</div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <aside className="rail">
+          <section className="panel">
+            <div className="panel-title">
+              Live transcript
+              {s.activity && <span className="live-dot" title={s.activity} />}
+            </div>
+            <div className="transcript" ref={transcriptRef}>
+              {s.transcript.length === 0 && <div className="placeholder">The room is quiet — assemble the council.</div>}
+              {s.transcript.map((t, i) => {
+                const p = turnParts(t);
+                return (
+                  <div key={i} className={`turn ${t.role}`}>
+                    <div className="turn-who">{p.who}</div>
+                    <div className="turn-said">{p.said}</div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+
+          <section className="panel">
+            <div className="panel-title">Plan &amp; next steps</div>
+            <div className="panel-body">
+              {leading && (
+                <div className="leadline">
+                  <span className="leadline-label">Leading</span> {leading.display}
+                </div>
+              )}
+              {s.workup.length === 0 && (
+                <div className="placeholder">Orders and coverage land here once the council proposes a workup.</div>
+              )}
+              {s.workup.map((o) => (
+                <div key={o.id} className="opt">
+                  <div className="title">{o.display} <span className="badge">{o.priority}</span></div>
+                  <div className="purpose">{o.purpose}</div>
+                  {o.sequenceNote && <div className="seq">⇄ {o.sequenceNote}</div>}
+                  {o.benefit && (
+                    <div className="ben">
+                      <div className="ben-label">Coverage facts</div>
+                      {o.benefit.matched ? (
+                        <>
+                          plan {o.benefit.planActive ? 'ACTIVE' : 'INACTIVE'}
+                          {o.benefit.copay && <> · copay <span className="money">{o.benefit.copay}</span></>}
+                          {o.benefit.deductibleRemaining && <> · deductible left <span className="money">{o.benefit.deductibleRemaining}</span></>}
+                          {o.benefit.oopRemaining && <> · OOP left <span className="money">{o.benefit.oopRemaining}</span></>}
+                          {o.benefit.messages.map((m, i) => <div key={i}>payer: “{m}”</div>)}
+                          <div className="caveat">(payer test response — estimate, not a guarantee)</div>
+                        </>
+                      ) : (
+                        <span className="caveat">no service-specific benefit information returned</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {allCreated.length > 0 && (
+                <>
+                  <div className="written-label">Written to chart — click to inspect the FHIR</div>
+                  <div>
+                    {allCreated.map((r) => (
+                      <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
+                        {r.resourceType}/{r.id.slice(0, 8)}…
+                      </span>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+          </section>
+        </aside>
       </div>
 
       {drawer && (
@@ -388,10 +450,6 @@ export default function Page() {
           <div className="footer-note">click anywhere to close</div>
         </div>
       )}
-
-      <div className="footer-note">
-        Synthetic data only · decision support, not diagnosis · every citation opens a real record resource
-      </div>
-    </>
+    </div>
   );
 }
