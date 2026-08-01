@@ -64,13 +64,17 @@ Hard requirements:
 HOUSE STYLE — follow these values exactly, every time, so every redraw looks like the
 same board. Do not improvise colours, sizes or positions.
 
+The cork board itself is a photograph behind your SVG — draw NOTHING for the background:
+no background rect, no cork fill, no speckles, no pattern. The canvas stays transparent
+and the cork shows through. Cards need their drop shadow to sit on it convincingly.
+
 Palette (use these hex values and no others):
-  cork #c9a075, cork speckle #b98e60, card #fdfbf4, card edge #d9cfbb,
+  card #fdfbf4, card edge #d9cfbb,
   ink #1c1a17, muted ink #6b6357, string #9d1420, pin #b3121c,
   leading card #fffdf3 with a #9d1420 2px border, conjecture stamp #9d1420.
 
-Structure — one <defs> with a drop-shadow filter and the cork pattern, then in order:
-  1. full-canvas cork <rect>, 2. all string <path>s, 3. all cards, 4. all pins.
+Structure — one <defs> with a drop-shadow filter, then in order:
+  1. all string <path>s, 2. all cards, 3. all pins.
   Strings always sit behind cards; pins always on top of their own card.
 
 Card geometry — fixed sizes only, no other dimensions:
@@ -108,7 +112,12 @@ String rules:
 Content rules:
   Keep evidence aliases (E1, E2…) on the cards they came from — that is the citation trail.
   Stamp "CONJECTURE" (10px bold #9d1420, rotated -8°) in the bottom-right corner of a card
-  whose claim was NOT cited, clear of its text. Never stamp a cited card.
+  ONLY when the note it came from is marked [CONJECTURE]. A card printing an alias
+  (E1, E6…) is cited by definition — stamping it is a clinical misstatement. When in
+  doubt, leave the stamp off.
+  One card per thing: never pin the same alias, specialty or workup item twice.
+  Every zone gets used — put specialty positions in the POSITIONS column rather than
+  stacking everything down the left side.
   At most 16 cards total.
 
 The board so far (only draw what is here — invent nothing):
