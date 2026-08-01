@@ -1,11 +1,11 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { Argument, ConversationTurn, Seat, SessionState } from '../src/shared/types';
+import type { ConversationTurn, Seat, SessionState } from '../src/shared/types';
 
-// The council table. Decision support, not diagnosis: the council argues, the
-// clinician decides — and clicks every consequential transition themselves.
-// Layout: House at the head, specialists flank the table, the clinician's seat
-// at the foot IS the push-to-talk control. Right rail: transcript + plan.
+// The panel consult room. Decision support, not diagnosis: the panel argues, the
+// clinician decides. One long table — House at the head, you at the foot with the
+// microphone, experts along the sides. The flow IS the interface: convene, speak,
+// listen, set the direction, write the plan to the chart.
 
 type S = SessionState & { version: number };
 
@@ -29,11 +29,27 @@ function useSession(): S | null {
   return s;
 }
 
-// Chair speech: pull the PCM stream and play through Web Audio.
+// Panel speech: pull the PCM stream and play through Web Audio. An analyser taps
+// the same graph and publishes live loudness as --audio-level, so the speaking
+// seat's ring pulses with the actual voice.
 function useChairAudio(enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const ctx = new AudioContext({ sampleRate: 24000 });
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 256;
+    analyser.connect(ctx.destination);
+    const data = new Uint8Array(analyser.fftSize);
+    let raf = 0;
+    const meter = () => {
+      analyser.getByteTimeDomainData(data);
+      let sum = 0;
+      for (let i = 0; i < data.length; i++) { const v = (data[i] - 128) / 128; sum += v * v; }
+      const rms = Math.sqrt(sum / data.length);
+      document.documentElement.style.setProperty('--audio-level', Math.min(1, rms * 4).toFixed(3));
+      raf = requestAnimationFrame(meter);
+    };
+    raf = requestAnimationFrame(meter);
     let nextAt = 0;
     let stop = false;
     (async () => {
@@ -56,19 +72,24 @@ function useChairAudio(enabled: boolean) {
           ab.copyToChannel(f32, 0);
           const src = ctx.createBufferSource();
           src.buffer = ab;
-          src.connect(ctx.destination);
+          src.connect(analyser);
           nextAt = Math.max(nextAt, ctx.currentTime + 0.05);
           src.start(nextAt);
           nextAt += ab.duration;
         }
       } catch {}
     })();
-    return () => { stop = true; ctx.close(); };
+    return () => {
+      stop = true;
+      cancelAnimationFrame(raf);
+      document.documentElement.style.setProperty('--audio-level', '0');
+      ctx.close();
+    };
   }, [enabled]);
 }
 
 // Push-to-talk: hold → mic PCM (24k linear16 via worklet) → /ws/voice → the live
-// council session's listen leg (nova-3). Release to stop. You are at the table.
+// panel session's listen leg (nova-3). Release to stop. You are at the table.
 function usePushToTalk() {
   const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream }>({});
   const [talking, setTalking] = useState(false);
@@ -103,13 +124,8 @@ function usePushToTalk() {
   return { talking, start, stop };
 }
 
-// Presentation helpers (no logic): avatar initials + seat role per persona/seat data.
-// Role detection reads seat data, never the roster — personas stay swappable.
-function initials(name?: string): string {
-  if (!name) return '·';
-  const words = name.replace(/\(.*?\)/g, '').split(/[\s,]+/).filter((w) => w && !/^(Dr|Ms|Mr|Mrs|M\.?D)\.?$/i.test(w));
-  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || name[0].toUpperCase();
-}
+// ---- Presentation helpers (no logic). Seat roles and labels read seat DATA, never
+// the roster, so a persona/case swap reseats the room with zero code changes. ----
 
 type SeatRole = 'chair' | 'human' | 'reimb' | 'empty' | 'specialist';
 function seatRole(seat: Seat): SeatRole {
@@ -120,44 +136,50 @@ function seatRole(seat: Seat): SeatRole {
   return 'specialist';
 }
 
-function SeatCard({ seat, speaking }: { seat: Seat; speaking: boolean }) {
+// Brief table names, DEMO_SPEC register: PULMO, GASTRO, I.D., ADVOCATE.
+const SHORT_LABEL: Record<string, string> = {
+  pulmonology: 'PULMO',
+  gastroenterology: 'GASTRO',
+  'infectious-disease': 'I.D.',
+  reimbursement: 'ADVOCATE',
+  'diagnostic-skeptic': 'SKEPTIC',
+  cardiology: 'CARDIO',
+  nephrology: 'NEPHRO',
+  neurology: 'NEURO',
+  'clinical-pharmacology': 'PHARM',
+  endocrinology: 'ENDO',
+  hematology: 'HEME',
+};
+function shortLabel(seat: Seat): string {
+  if (seatRole(seat) === 'chair') {
+    const surname = (seat.personaName || 'Chair').replace(/,.*$/, '').trim().split(/\s+/).pop();
+    return (surname || 'CHAIR').toUpperCase();
+  }
+  return SHORT_LABEL[seat.specialty] || seat.specialty.split('-')[0].slice(0, 7).toUpperCase();
+}
+
+function SeatPill({ seat, speaking }: { seat: Seat; speaking: boolean }) {
   const role = seatRole(seat);
-  const shortName = seat.personaName?.replace(/\s*\(.*?\)/g, '');
   return (
     <div
       className={`seat ${role}${speaking ? ' speaking' : ''}`}
-      title={[seat.personaName, ...seat.reasons].filter(Boolean).join(' · ')}
+      title={[seat.personaName, seat.specialty.replace(/-/g, ' '), ...seat.reasons].filter(Boolean).join(' · ')}
     >
-      <div className="avatar">{role === 'empty' ? '?' : initials(seat.personaName)}</div>
-      <div className="meta">
-        <div className="who">{role === 'empty' ? 'Empty seat' : shortName}</div>
-        <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
-        <div className="why">{seat.reasons[0]}</div>
-      </div>
+      {shortLabel(seat)}
     </div>
   );
 }
 
-function ClaimLine({ a, onCite }: { a: Argument; onCite: (rt: string, id: string) => void }) {
-  return (
-    <div className="claim">
-      {a.claim}{' '}
-      {a.provenance === 'cited' ? (
-        a.resolved.map((e) => (
-          <span key={e.alias} className="chip support" title={e.fact} onClick={() => onCite(e.resourceType, e.resourceId)}>
-            {e.alias} · {e.resourceType}
-          </span>
-        ))
-      ) : (
-        <span className="chip conjecture">CONJECTURE — not established in this patient</span>
-      )}
-    </div>
-  );
-}
+const PHASE_STATUS: Partial<Record<S['phase'], string>> = {
+  listening: 'the panel is listening…',
+  reasoning: 'the panel is thinking…',
+  'retrieving-evidence': 'reading the chart…',
+  'checking-benefits': 'running the insurance…',
+  'writing-fhir': 'writing to the chart…',
+};
 
 export default function Page() {
   const s = useSession();
-  const [text, setText] = useState('');
   const [drawer, setDrawer] = useState<{ title: string; json: unknown } | null>(null);
   const [audioOn, setAudioOn] = useState(false);
   const [finalized, setFinalized] = useState<string | null>(null);
@@ -198,176 +220,128 @@ export default function Page() {
 
   const seats = s.seating?.seats || [];
   const chairSeat = seats.find((st) => seatRole(st) === 'chair');
-  const sideSeats = seats.filter((st) => st !== chairSeat && st.status !== 'human');
+  const sideSeats = seats.filter((st) => st !== chairSeat && st.status !== 'human' && st.status !== 'empty');
   const half = Math.ceil(sideSeats.length / 2);
   const leftSeats = sideSeats.slice(0, half);
   const rightSeats = sideSeats.slice(half);
-  const canAssemble = s.phase === 'case-ready' || s.phase === 'recoverable-error';
+  const canConvene = s.phase === 'case-ready' || s.phase === 'recoverable-error';
   const canFinalize = s.phase === 'benefits-ready' || s.phase === 'workup-ready';
   const leading = s.differential.find((d) => d.status === 'leading');
   const allCreated = [...created, ...s.createdResources];
+  const status = s.activity || PHASE_STATUS[s.phase] || '';
 
   // Who has the floor: the seat behind the most recent non-clinician turn, if fresh.
-  const lastTurn = s.transcript[s.transcript.length - 1];
+  // Turns carrying internal tool names are orchestration echoes, not speech — hide them.
+  const visibleTurns = s.transcript.filter(
+    (t) => t.role !== 'system' && !/submit_council_output|propose_workup|get_benefits/.test(t.text)
+  );
+  const lastTurn = visibleTurns[visibleTurns.length - 1];
   const floorTurn = lastTurn && lastTurn.role !== 'clinician' && Date.now() - lastTurn.at < 8000 ? lastTurn : null;
   const hasFloor = (seat: Seat) =>
     !!floorTurn &&
     (seat.personaId === floorTurn.personaId || (floorTurn.role === 'chair' && seatRole(seat) === 'chair'));
 
-  const chairName = chairSeat?.personaName || 'Chair';
-  const turnParts = (t: ConversationTurn): { who: string; said: string } => {
+  const chairShort = chairSeat ? shortLabel(chairSeat) : 'CHAIR';
+  const shortById: Record<string, string> = {};
+  for (const seat of seats) if (seat.personaId) shortById[seat.personaId] = shortLabel(seat);
+  const whoFor = (t: ConversationTurn): string => {
+    if (t.role === 'clinician') return 'YOU';
+    if (t.role === 'chair') return chairShort;
+    if (t.personaId && shortById[t.personaId]) return shortById[t.personaId];
+    return t.role === 'specialist' ? 'PANEL' : '·';
+  };
+  const saidFor = (t: ConversationTurn): string => {
+    let text = t.text;
     if (t.role === 'specialist') {
-      const i = t.text.indexOf(': ');
-      if (i > 0 && i < 48) return { who: t.text.slice(0, i), said: t.text.slice(i + 2) };
-      return { who: 'specialist', said: t.text };
+      const i = text.indexOf(': ');
+      if (i > 0 && i < 48) text = text.slice(i + 2);
     }
-    if (t.role === 'chair') return { who: chairName, said: t.text };
-    if (t.role === 'clinician') return { who: 'You', said: t.text };
-    return { who: 'system', said: t.text };
+    if (t.role === 'chair') text = text.replace(/^(house[^:]{0,24}|chair)\s*:\s*/i, '');
+    return text;
+  };
+
+  const convene = () => {
+    setAudioOn(true); // the click is the user gesture the audio graph needs
+    setFinalized(null);
+    setCreated([]);
+    void post('/api/session/assemble');
   };
 
   return (
     <div className="app">
       <header className="masthead">
         <span className="name">house_md</span>
-        <span className="subname">Council of Peers</span>
-        {s.patient && (
-          <>
-            <span className="patient">{s.patient.name} · DOB {s.patient.dob}</span>
-            <span className="badge syn">Synthetic data</span>
-            <span className="badge">{s.patient.payer}</span>
-          </>
-        )}
-        <span className="badge phase">{s.phase.replace(/-/g, ' ')}</span>
-        {s.activity && <span className="activity">{s.activity}</span>}
+        {s.patient && <span className="patient">{s.patient.name}</span>}
+        <span className="badge syn" title="Synthetic patient — decision support, not diagnosis: the panel argues, the clinician decides.">
+          Synthetic · decision support, not diagnosis
+        </span>
         <span className="spacer" />
-        <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 Chair audio on' : '🔇 Enable chair audio'}</button>
+        {status && <span className="activity">{status}</span>}
+        <button className="ghost" onClick={() => setAudioOn((v) => !v)}>{audioOn ? 'Mute' : 'Unmute'}</button>
+        <button className="ghost" onClick={() => { post('/api/session/reset'); setFinalized(null); setCreated([]); }}>
+          Reset
+        </button>
       </header>
 
       <div className="main">
         <section className="chamber">
           <div className="head-row">
-            {chairSeat && <SeatCard seat={chairSeat} speaking={hasFloor(chairSeat)} />}
+            {chairSeat && <SeatPill seat={chairSeat} speaking={hasFloor(chairSeat)} />}
           </div>
 
-          <div className="table-zone">
-            <div className="table-surface" />
-            <div className="side">
+          <div className="table-row">
+            <div className="side left">
               {leftSeats.map((seat, i) => (
-                <SeatCard key={`l-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
+                <SeatPill key={`l-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
               ))}
             </div>
 
-            <div className="board">
-              {s.differential.length === 0 && s.contributions.length === 0 && (
-                <div className="placeholder">
-                  {s.phase === 'case-ready'
-                    ? 'The table is set. Assemble the council to begin.'
-                    : 'The council is working — arguments land here with citations.'}
+            <div className="table-surface">
+              {s.patient && (
+                <div className="case-card">
+                  <div className="case-name">{s.patient.name}</div>
+                  {s.features?.chiefComplaint && <div className="case-cc">{s.features.chiefComplaint}</div>}
                 </div>
               )}
-
-              {s.differential.length > 0 && (
-                <>
-                  <h3>Living differential <span className="sub">every claim cited or labeled conjecture</span></h3>
-                  {s.differential.map((d) => (
-                    <div key={d.id} className={`dx ${d.status === 'leading' ? 'leading' : ''}`}>
-                      <div className="head">
-                        <span className="rank">{d.rank}</span>
-                        <span className="title">{d.display}</span>
-                        <span className="spacer" />
-                        {s.phase !== 'case-ready' && (
-                          <button disabled={d.status === 'leading'} onClick={() => post('/api/session/select', { id: d.id })}>
-                            {d.status === 'leading' ? 'leading' : 'select as leading'}
-                          </button>
-                        )}
-                      </div>
-                      <div className="assessment">{d.assessment}</div>
-                      {d.supporting.map((a, i) => <ClaimLine key={`s${i}`} a={a} onCite={openCite} />)}
-                      {d.contradicting.map((a, i) => (
-                        <div key={`c${i}`} className="claim">
-                          <span className="chip contra">against</span> <ClaimLine a={a} onCite={openCite} />
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </>
-              )}
-
-              {s.contributions.length > 0 && (
-                <>
-                  <h3>Council positions</h3>
-                  {s.contributions.map((c, i) => (
-                    <div key={i} className="dx">
-                      <div className="head"><span className="title">{c.specialty.replace(/-/g, ' ')}</span></div>
-                      <ClaimLine a={c.interpretation} onCite={openCite} />
-                      {c.contradiction && (
-                        <div className="claim"><span className="chip contra">but</span> <ClaimLine a={c.contradiction} onCite={openCite} /></div>
-                      )}
-                      {c.discriminator && <div className="claim">→ discriminator: {c.discriminator}</div>}
-                    </div>
-                  ))}
-                </>
-              )}
             </div>
 
-            <div className="side">
+            <div className="side right">
               {rightSeats.map((seat, i) => (
-                <SeatCard key={`r-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
+                <SeatPill key={`r-${seat.specialty}-${i}`} seat={seat} speaking={hasFloor(seat)} />
               ))}
             </div>
           </div>
 
-          <div className="dock">
-            <div className="dock-row">
-              <div className="dock-group">
-                <button className={canAssemble ? 'primary' : ''} disabled={!canAssemble} onClick={() => post('/api/session/assemble')}>
-                  🩺 Assemble council
-                </button>
-                <button onClick={() => { post('/api/session/reset'); setFinalized(null); setCreated([]); }}>Reset</button>
-              </div>
-
-              <button
-                className={`ptt${ptt.talking ? ' talking' : ''}`}
-                disabled={s.phase === 'case-ready'}
-                onPointerDown={ptt.start}
-                onPointerUp={ptt.stop}
-                onPointerLeave={ptt.stop}
-              >
-                <span className="avatar">YOU</span>
-                <span className="ptt-text">
-                  <span className="ptt-label">{ptt.talking ? '🎙 Listening — release when done' : '🎙 Hold to speak to the council'}</span>
-                  <span className="ptt-sub">your seat, at the foot of the table</span>
-                </span>
+          <div className="foot">
+            {canConvene ? (
+              <button className="convene" onClick={convene}>
+                Convene the panel
+                <span className="sub">the panel reads the chart and joins with live voices — then present your case</span>
               </button>
-
-              <div className="dock-group grow">
-                <input
-                  type="text"
-                  placeholder="…or type your interjection"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && text.trim()) { post('/api/session/say', { text }); setText(''); }
-                  }}
-                />
-                <button onClick={() => { if (text.trim()) { post('/api/session/say', { text }); setText(''); } }}>Say</button>
-                <button className={canFinalize ? 'primary' : ''} disabled={!canFinalize} onClick={finalize}>
-                  ✅ Finalize → chart
+            ) : (
+              <div className="foot-row">
+                <button
+                  className={`ptt${ptt.talking ? ' talking' : ''}`}
+                  onPointerDown={ptt.start}
+                  onPointerUp={ptt.stop}
+                  onPointerLeave={ptt.stop}
+                >
+                  <span className="avatar">YOU</span>
+                  <span className="ptt-text">
+                    <span className="ptt-label">{ptt.talking ? 'Listening — release when done' : 'Hold to speak'}</span>
+                    <span className="ptt-sub">your seat, at the foot of the table</span>
+                  </span>
                 </button>
-              </div>
-            </div>
-            {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
-            {s.error && (
-              <div className="errorbox">
-                {s.error}{' '}
-                <button onClick={() => post('/api/session/assemble')}>retry</button>
+                {canFinalize && (
+                  <button className="write" onClick={finalize}>Write plan to chart</button>
+                )}
               </div>
             )}
-            <div className="smallprint">
-              <b>1</b> Assemble · <b>2</b> Listen · <b>3</b> Hold to speak · <b>4</b> Select leading dx · <b>5</b> Review plan ·{' '}
-              <b>6</b> Finalize&ensp;—&ensp;synthetic data only · decision support, not diagnosis: the council argues, the clinician decides
-            </div>
+            {s.error && (
+              <div className="errorbox">
+                {s.error} <button onClick={() => post('/api/session/assemble')}>retry</button>
+              </div>
+            )}
           </div>
         </section>
 
@@ -375,68 +349,87 @@ export default function Page() {
           <section className="panel">
             <div className="panel-title">
               Live transcript
-              {s.activity && <span className="live-dot" title={s.activity} />}
+              {status && <span className="live-dot" title={status} />}
             </div>
             <div className="transcript" ref={transcriptRef}>
-              {s.transcript.length === 0 && <div className="placeholder">The room is quiet — assemble the council.</div>}
-              {s.transcript.map((t, i) => {
-                const p = turnParts(t);
-                return (
-                  <div key={i} className={`turn ${t.role}`}>
-                    <div className="turn-who">{p.who}</div>
-                    <div className="turn-said">{p.said}</div>
-                  </div>
-                );
-              })}
+              {visibleTurns.length === 0 && (
+                <div className="placeholder">
+                  The room is quiet. Convene the panel, then open with your theory and your question — the panel takes it from there.
+                </div>
+              )}
+              {visibleTurns.map((t, i) => (
+                <div key={i} className={`turn ${t.role}`}>
+                  <div className="turn-who">{whoFor(t)}</div>
+                  <div className="turn-said">{saidFor(t)}</div>
+                </div>
+              ))}
             </div>
           </section>
 
           <section className="panel">
-            <div className="panel-title">Plan &amp; next steps</div>
+            <div className="panel-title">Next steps</div>
             <div className="panel-body">
-              {leading && (
+              {leading && s.workup.length > 0 && (
                 <div className="leadline">
                   <span className="leadline-label">Leading</span> {leading.display}
                 </div>
               )}
-              {s.workup.length === 0 && (
-                <div className="placeholder">Orders and coverage land here once the council proposes a workup.</div>
+
+              {s.workup.length === 0 && s.differential.length > 0 && (
+                <>
+                  <div className="steps-label">The panel’s differential — set the direction</div>
+                  {s.differential.map((d) => (
+                    <button
+                      key={d.id}
+                      className={`dxrow${d.status === 'leading' ? ' leading' : ''}`}
+                      disabled={d.status === 'leading'}
+                      onClick={() => post('/api/session/select', { id: d.id })}
+                    >
+                      <span className="rank">{d.rank}</span>
+                      <span className="dx-name">{d.display}</span>
+                    </button>
+                  ))}
+                </>
               )}
+
               {s.workup.map((o) => (
                 <div key={o.id} className="opt">
-                  <div className="title">{o.display} <span className="badge">{o.priority}</span></div>
+                  <div className="opt-head">
+                    <span className="title">{o.display}</span>
+                    <span className={`prio ${o.priority}`}>{o.priority}</span>
+                  </div>
                   <div className="purpose">{o.purpose}</div>
-                  {o.sequenceNote && <div className="seq">⇄ {o.sequenceNote}</div>}
+                  {o.sequenceNote && <div className="seq">{o.sequenceNote}</div>}
                   {o.benefit && (
-                    <div className="ben">
-                      <div className="ben-label">Coverage facts</div>
-                      {o.benefit.matched ? (
-                        <>
-                          plan {o.benefit.planActive ? 'ACTIVE' : 'INACTIVE'}
-                          {o.benefit.copay && <> · copay <span className="money">{o.benefit.copay}</span></>}
-                          {o.benefit.deductibleRemaining && <> · deductible left <span className="money">{o.benefit.deductibleRemaining}</span></>}
-                          {o.benefit.oopRemaining && <> · OOP left <span className="money">{o.benefit.oopRemaining}</span></>}
-                          {o.benefit.messages.map((m, i) => <div key={i}>payer: “{m}”</div>)}
-                          <div className="caveat">(payer test response — estimate, not a guarantee)</div>
-                        </>
-                      ) : (
-                        <span className="caveat">no service-specific benefit information returned</span>
-                      )}
+                    <div className="cov" title={o.benefit.messages.join(' · ') || undefined}>
+                      {o.benefit.matched
+                        ? [
+                            `plan ${o.benefit.planActive ? 'active' : 'inactive'}`,
+                            o.benefit.copay && `copay ${o.benefit.copay}`,
+                            o.benefit.deductibleRemaining && `deductible left ${o.benefit.deductibleRemaining}`,
+                          ].filter(Boolean).join(' · ')
+                        : 'no benefit information returned'}
                     </div>
                   )}
                 </div>
               ))}
+
               {allCreated.length > 0 && (
                 <>
-                  <div className="written-label">Written to chart — click to inspect the FHIR</div>
+                  <div className="steps-label">Written to the chart</div>
                   <div>
                     {allCreated.map((r) => (
-                      <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
+                      <span key={r.id} className="chip" onClick={() => openCite(r.resourceType, r.id)}>
                         {r.resourceType}/{r.id.slice(0, 8)}…
                       </span>
                     ))}
                   </div>
                 </>
+              )}
+              {finalized && <div className={finalized.startsWith('Wrote') ? 'okline' : 'errorbox'}>{finalized}</div>}
+
+              {s.differential.length === 0 && s.workup.length === 0 && allCreated.length === 0 && (
+                <div className="placeholder">The panel’s plan lands here.</div>
               )}
             </div>
           </section>
