@@ -239,6 +239,9 @@ async function runTool(name: string, args: any): Promise<unknown> {
       if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
     }
     live.pendingLines = heard.slice(0, 2);
+    // Chair audio may already be done (AgentAudioDone can precede this tool call) —
+    // schedule playback; the speaking flag + FIFO keep it overlap-safe.
+    setTimeout(() => void speakPendingLines(), 4000);
     mutate((s) => {
       s.contributions = contributions;
       s.differential = differential.sort((a, b) => a.rank - b.rank);
@@ -485,7 +488,7 @@ export function selectHypothesis(id: string): void {
   });
   const s = getState();
   const dx = s.differential.find((d) => d.id === id);
-  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it, then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
+  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it — include the specialist consultation the standard pathway warrants (e.g. cardiology consult) as one option alongside the tests — then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
 }
 
 export function sendMicAudio(buf: Buffer): void {
