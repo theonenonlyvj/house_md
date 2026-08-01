@@ -1,9 +1,38 @@
-# house_md — build plan (locked ~11:45am)
+# house_md — build plan (locked ~11:45am; council architecture refined ~12:00)
 
-**The pitch:** the House whiteboard scene, as an agent. A clinician presents a case; the
-agent argues the differential with them — citing the patient's actual record — then
-checks what the patient's coverage really pays for and turns the leading dx into a
-*feasible* care plan. A council of peers at your fingertips.
+**The pitch:** the House whiteboard scene, as agents — plural. A doctor presents a case
+and gets a full **council of peers**: multiple specialist agents argue the differential
+against each other, citing the patient's actual record; the council checks what the
+patient's coverage really pays for; then it helps discuss appropriate, *available*
+treatment options with the patient. Diagnosis is a team sport; most doctors don't have
+the team.
+
+## Council architecture
+
+- **Seats:** a moderator/chair + case-relevant specialist personas (each with its own
+  system prompt, argument style, and — if voice lands — its own Deepgram Aura voice, so
+  the whiteboard scene is *audible*). Specialists argue FOR their leading hypothesis and
+  against each other's; the chair synthesizes the ranked differential.
+- **Every claim cites the record** — supporting/contradicting evidence pinned to actual
+  FHIR resources (Observation/Condition ids). An argument without a citation gets
+  labeled as conjecture by the chair.
+
+## Guardrail #1 — council COMPOSITION (the load-bearing one)
+
+The right specialists must be in the room for the case. A deterministic (non-LLM)
+mapping from case features (chief complaint, organ systems, meds, age/sex) → required
+specialties decides who gets seated. Two rules:
+1. If the case needs a specialty the council can't seat, the chair SAYS SO on the
+   record ("this presentation warrants nephrology input; that seat is empty — flagging,
+   not guessing") rather than letting a wrong persona improvise expertise.
+2. The seating decision is visible in the UI (who's on the council and WHY), so the
+   demo can show the guardrail working — seat selection is auditable, not vibes.
+
+## Guardrails #2+ (standing)
+
+- Clinician-facing decision support, not diagnosis: the council argues, the doctor
+  decides. Patient-facing mode only DISCUSSES options the doctor approved.
+- No invented SNOMED/ICD/CPT codes; synthetic patients only.
 
 **Why it wins:** hits two legs of the judges' own vision verbatim ("any health issue you
 describe is deep researched" + "how much will it cost, will insurance cover it"). The
