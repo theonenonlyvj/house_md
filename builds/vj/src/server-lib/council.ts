@@ -45,7 +45,10 @@ async function speakPendingLines(): Promise<void> {
             signal: AbortSignal.timeout(20000),
           }
         );
-        if (!res.ok) continue;
+        if (!res.ok) {
+          console.error('[council] tts failed', res.status, line.voice, (await res.text()).slice(0, 120));
+          continue;
+        }
         const pcm = Buffer.from(await res.arrayBuffer());
         mutate((s) => { s.transcript.push({ role: 'specialist', personaId: line.personaId, text: `${line.name}: ${line.text}`, at: Date.now() }); });
         // stream in ~200ms slices so playback starts promptly
@@ -154,7 +157,8 @@ const FUNCTION_DEFS = [
   },
   {
     name: 'propose_workup',
-    description: 'Propose 2-4 next workup steps for the selected leading hypothesis.',
+    description:
+      'Propose 2-4 next steps for the selected leading hypothesis — tests AND any specialist consultation/referral the direction warrants (standard pathways usually include one).',
     parameters: {
       type: 'object',
       properties: {
@@ -198,9 +202,13 @@ async function runTool(name: string, args: any): Promise<unknown> {
   const amap = aliasMapOf(chart);
 
   if (name === 'search_patient_evidence') {
-    mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${String(args.query).slice(0, 80)}"`; });
-    const hits = searchEvidence(chart, String(args.query || ''));
-    mutate((s) => { s.activity = `chart search returned ${hits.length} of ${chart.aliases.length} records`; });
+    const q = String(args.query || '');
+    mutate((s) => { s.phase = 'retrieving-evidence'; s.activity = `searching chart: "${q.slice(0, 80)}"`; });
+    const { mossSearch } = await import('./moss');
+    const mossHits = await mossSearch(chart, q);
+    const hits = mossHits ?? searchEvidence(chart, q);
+    const source = mossHits ? 'Moss semantic search' : 'chart keyword search';
+    mutate((s) => { s.activity = `${source}: ${hits.length} of ${chart.aliases.length} records for "${q.slice(0, 50)}"`; });
     return { evidence: hits.map((h) => ({ alias: h.alias, resourceType: h.resourceType, fact: h.fact })) };
   }
 
@@ -229,15 +237,25 @@ async function runTool(name: string, args: any): Promise<unknown> {
 
     // Audible council: queue up to TWO heard lines — first cited specialist + the
     // skeptic — in their own voices (PLAN-FINAL §3). Played after chair audio ends.
+    // The model's personaId strings are loose (id/name/specialty) — resolve fuzzily.
+    const personaOf = (c: SpecialistContribution) =>
+      ROSTER.find((r) => r.id === c.personaId) ||
+      ROSTER.find((r) => r.name === c.personaId) ||
+      ROSTER.find((r) => r.specialty === c.specialty) ||
+      ROSTER.find((r) => c.specialty.toLowerCase().includes(r.specialty.split('-')[0]));
     const heard: typeof live.pendingLines = [];
-    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && ROSTER.find((r) => r.id === c.personaId)?.kind === 'specialist');
-    const skeptic = contributions.find((c) => ROSTER.find((r) => r.id === c.personaId)?.kind === 'skeptic');
+    const firstCited = contributions.find((c) => c.interpretation.provenance === 'cited' && personaOf(c)?.kind === 'specialist');
+    const skeptic = contributions.find((c) => personaOf(c)?.kind === 'skeptic');
     for (const c of [firstCited, skeptic]) {
       if (!c) continue;
-      const p = ROSTER.find((r) => r.id === c.personaId);
+      const p = personaOf(c);
       if (p?.voice) heard.push({ name: p.name, voice: p.voice, text: c.interpretation.claim, personaId: p.id });
     }
     live.pendingLines = heard.slice(0, 2);
+    console.log('[council] queued audible lines:', live.pendingLines.length, live.pendingLines.map((l) => l.name));
+    // Chair audio may already be done (AgentAudioDone can precede this tool call) —
+    // schedule playback; the speaking flag + FIFO keep it overlap-safe.
+    setTimeout(() => void speakPendingLines(), 4000);
     mutate((s) => {
       s.contributions = contributions;
       s.differential = differential.sort((a, b) => a.rank - b.rank);
@@ -251,6 +269,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
   }
 
   if (name === 'propose_workup') {
+    const CONSULT_RE = /consult|referral|specialist|clinic visit|evaluation by/i;
     mutate((s) => {
       s.workup = (args.options || []).slice(0, 4).map((o: any, i: number) => ({
         id: `opt-${i + 1}`,
@@ -259,6 +278,19 @@ async function runTool(name: string, args: any): Promise<unknown> {
         priority: ['now', 'next', 'later'].includes(o.priority) ? o.priority : 'next',
         selected: true,
       }));
+      // Pathway floor (config, not generation): the standard pathway includes a
+      // specialist consultation; if the model omitted it, append the case-config one
+      // so the coverage/referral beat always has its anchor. Badged in UI.
+      if (!s.workup.some((o) => CONSULT_RE.test(o.display))) {
+        s.workup.push({
+          id: `opt-${s.workup.length + 1}`,
+          display: 'Cardiology consultation',
+          purpose: 'Specialist evaluation for the leading direction (standard pathway step)',
+          priority: 'next',
+          selected: true,
+          sequenceNote: 'added per standard pathway',
+        });
+      }
       s.phase = 'workup-ready';
       s.activity = undefined;
     });
@@ -273,7 +305,7 @@ async function runTool(name: string, args: any): Promise<unknown> {
       mutate((s) => {
         const referral = facts.messages.find((m) => /referral/i.test(m));
         for (const opt of s.workup) {
-          const isConsult = /consult|referral|cardiolog|specialist/i.test(opt.display);
+          const isConsult = /consult|referral|specialist|clinic visit|evaluation by/i.test(opt.display);
           if (isConsult) {
             opt.benefit = facts;
             if (referral) {
@@ -360,6 +392,8 @@ function buildSettings(thinkModel: string) {
 export async function assemble(presentation: string): Promise<void> {
   const chart = await loadChart();
   live.chart = chart;
+  const { kickChartIndex } = await import('./moss');
+  kickChartIndex(chart);
   const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
   const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty);
   mutate((s) => {
@@ -420,9 +454,15 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       return;
     }
     if (msg.type === 'ConversationText') {
+      const text = String(msg.content || '');
+      // Guard: models occasionally echo prompt fragments as assistant turns — keep
+      // the spoken transcript short, human lines only.
+      if (msg.role === 'assistant' && (text.length > 500 || /SEATED COUNCIL|RULES:|argument style/i.test(text))) return;
       mutate((s) => {
         const role = msg.role === 'assistant' ? 'chair' : 'clinician';
-        s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text: String(msg.content || ''), at: Date.now() });
+        const last = s.transcript[s.transcript.length - 1];
+        if (last && last.role === role && last.text === text) return; // dedupe repeats
+        s.transcript.push({ role, personaId: role === 'chair' ? 'chair-house' : undefined, text, at: Date.now() });
       });
       return;
     }
@@ -437,7 +477,20 @@ async function openAgent(presentation: string, thinkModel = process.env.THINK_MO
       }
       return;
     }
+    if (msg.type === 'AgentThinking') {
+      mutate((s) => { s.activity = 'the chair is thinking…'; });
+      return;
+    }
+    if (msg.type === 'UserStartedSpeaking') {
+      mutate((s) => { s.activity = 'hearing you…'; });
+      return;
+    }
+    if (msg.type === 'AgentStartedSpeaking') {
+      mutate((s) => { s.activity = 'the chair is speaking'; });
+      return;
+    }
     if (msg.type === 'AgentAudioDone') {
+      mutate((s) => { s.activity = undefined; });
       void speakPendingLines();
       return;
     }
@@ -484,12 +537,14 @@ export function selectHypothesis(id: string): void {
   });
   const s = getState();
   const dx = s.differential.find((d) => d.id === id);
-  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it, then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
+  inject(`The managing clinician selects "${dx?.display}" as the leading direction (not confirmed). Council: propose_workup for it — include the specialist consultation the standard pathway warrants (e.g. cardiology consult) as one option alongside the tests — then get_benefits, then Ms. Okafor speaks the coverage reality and any re-sequencing.`);
 }
 
 export function sendMicAudio(buf: Buffer): void {
   if (live.ws && live.ready && live.ws.readyState === WebSocket.OPEN) live.ws.send(buf);
 }
+// Bridge for the plain-JS ws relay in server.js (same process, different module graph).
+g.__housemd_mic = sendMicAudio;
 
 export function getPatientPlanText(): string {
   if (live.patientPlanText) return live.patientPlanText;

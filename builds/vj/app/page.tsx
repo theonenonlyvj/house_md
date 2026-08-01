@@ -12,12 +12,19 @@ const post = (url: string, body?: unknown) =>
 
 function useSession(): S | null {
   const [s, setS] = useState<S | null>(null);
+  const lastVersion = useRef(-1);
   useEffect(() => {
     let alive = true;
     const tick = async () => {
       try {
         const r = await fetch('/api/session', { cache: 'no-store' });
-        if (alive) setS(await r.json());
+        const next: S = await r.json();
+        // Only re-render when server state actually changed — polling without this
+        // repaints the whole table every 700ms and feels randomly laggy.
+        if (alive && next.version !== lastVersion.current) {
+          lastVersion.current = next.version;
+          setS(next);
+        }
       } catch {}
     };
     tick();
@@ -55,7 +62,7 @@ function useChairAudio(enabled: boolean) {
           const src = ctx.createBufferSource();
           src.buffer = ab;
           src.connect(ctx.destination);
-          nextAt = Math.max(nextAt, ctx.currentTime + 0.05);
+          nextAt = Math.max(nextAt, ctx.currentTime + 0.15);
           src.start(nextAt);
           nextAt += ab.duration;
         }
@@ -63,6 +70,56 @@ function useChairAudio(enabled: boolean) {
     })();
     return () => { stop = true; ctx.close(); };
   }, [enabled]);
+}
+
+// Push-to-talk: hold → mic PCM (24k linear16 via worklet) → /ws/voice → the live
+// council session's listen leg (nova-3). Release to stop. You are at the table.
+function usePushToTalk() {
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream }>({});
+  const [talking, setTalking] = useState(false);
+  const start = useCallback(async () => {
+    if (ref.current.ws) return;
+    try {
+      const ws = new WebSocket(`ws://${location.host}/ws/voice`);
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+      });
+      const ctx = new AudioContext({ sampleRate: 24000 });
+      await ctx.audioWorklet.addModule('/pcm-worklet.js');
+      const src = ctx.createMediaStreamSource(stream);
+      const node = new AudioWorkletNode(ctx, 'pcm-capture');
+      node.port.onmessage = (e) => { if (ws.readyState === 1) ws.send(e.data); };
+      src.connect(node);
+      ref.current = { ws, ctx, stream };
+      setTalking(true);
+    } catch {
+      setTalking(false);
+    }
+  }, []);
+  const stop = useCallback(() => {
+    const { ws, ctx, stream } = ref.current;
+    stream?.getTracks().forEach((t) => t.stop());
+    void ctx?.close();
+    setTimeout(() => ws?.close(), 400);
+    ref.current = {};
+    setTalking(false);
+  }, []);
+  return { talking, start, stop };
+}
+
+// Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
+function initials(name?: string): string {
+  if (!name) return '·';
+  const words = name.replace(/\(.*?\)/g, '').split(/[\s,]+/).filter((w) => w && !/^(Dr|Ms|Mr|Mrs|M\.?D)\.?$/i.test(w));
+  return words.slice(0, 2).map((w) => w[0].toUpperCase()).join('') || name[0].toUpperCase();
+}
+function seatClass(seat: { status: string; personaId?: string }): string {
+  if (seat.status === 'empty') return 'seat empty';
+  if (seat.status === 'human') return 'seat human';
+  if (seat.personaId === 'chair-house') return 'seat chair';
+  if (seat.personaId === 'reimbursement') return 'seat reimb';
+  return 'seat';
 }
 
 function ClaimLine({ a, onCite }: { a: Argument; onCite: (rt: string, id: string) => void }) {
@@ -88,8 +145,10 @@ export default function Page() {
   const [drawer, setDrawer] = useState<{ title: string; json: unknown } | null>(null);
   const [audioOn, setAudioOn] = useState(false);
   const [finalized, setFinalized] = useState<string | null>(null);
+  const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   useChairAudio(audioOn);
+  const ptt = usePushToTalk();
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -116,6 +175,7 @@ export default function Page() {
     });
     const data = await res.json();
     setFinalized(res.ok ? `Wrote ${data.created?.length ?? 0} resources to the chart.` : `Write-back failed: ${data.error}`);
+    if (res.ok) setCreated(data.created || []);
   }, [s]);
 
   if (!s) return <div className="footer-note">loading…</div>;
@@ -128,9 +188,10 @@ export default function Page() {
     <>
       <div className="topstrip">
         <span className="name">house_md</span>
+        <span className="subname">Council of Peers</span>
         {s.patient && (
           <>
-            <span>{s.patient.name} · DOB {s.patient.dob}</span>
+            <span className="patient">{s.patient.name} · DOB {s.patient.dob}</span>
             <span className="badge syn">SYNTHETIC DATA</span>
             <span className="badge">{s.patient.payer}</span>
           </>
@@ -139,11 +200,12 @@ export default function Page() {
         {s.activity && <span className="activity">{s.activity}</span>}
         <span style={{ flex: 1 }} />
         <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 chair audio on' : '🔇 enable chair audio'}</button>
-        <span className="badge">the council argues, the clinician decides</span>
+        <span className="tagline">the council argues, the clinician decides</span>
       </div>
 
       <div className="stage">
         <div className="table-wrap">
+          <div className="table-surface" />
           {seats.map((seat, i) => {
             const angle = (i / Math.max(n, 1)) * 2 * Math.PI - Math.PI / 2;
             const x = 50 + 44 * Math.cos(angle);
@@ -151,10 +213,13 @@ export default function Page() {
             return (
               <div
                 key={`${seat.specialty}-${seat.status}-${i}`}
-                className={`seat ${seat.status}`}
-                style={{ left: `calc(${x}% - 74px)`, top: `calc(${y}% - 30px)` }}
+                className={seatClass(seat)}
+                style={{ left: `calc(${x}% - 79px)`, top: `calc(${y}% - 44px)` }}
                 title={seat.reasons.join(' · ')}
               >
+                <div className="avatar">
+                  {seat.status === 'empty' ? '?' : seat.status === 'human' ? 'YOU' : initials(seat.personaName)}
+                </div>
                 <div className="who">{seat.status === 'empty' ? 'EMPTY SEAT' : seat.personaName}</div>
                 <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
                 <div className="why">{seat.reasons[0]}</div>
@@ -164,7 +229,7 @@ export default function Page() {
 
           <div className="center">
             {s.differential.length === 0 && (
-              <div style={{ color: 'var(--muted)' }}>
+              <div className="placeholder">
                 {s.phase === 'case-ready'
                   ? 'Load the case, then assemble the council.'
                   : 'The council is working — arguments land here with citations.'}
@@ -173,11 +238,11 @@ export default function Page() {
 
             {s.differential.length > 0 && (
               <>
-                <h3>Differential — every claim cited or labeled conjecture</h3>
+                <h3>Differential <span className="sub">every claim cited or labeled conjecture</span></h3>
                 {s.differential.map((d) => (
                   <div key={d.id} className={`dx ${d.status === 'leading' ? 'leading' : ''}`}>
                     <div className="head">
-                      <span className="rank">#{d.rank}</span>
+                      <span className="rank">{d.rank}</span>
                       <span className="title">{d.display}</span>
                       <span style={{ flex: 1 }} />
                       {s.phase !== 'case-ready' && (
@@ -186,7 +251,7 @@ export default function Page() {
                         </button>
                       )}
                     </div>
-                    <div style={{ fontSize: 13 }}>{d.assessment}</div>
+                    <div className="assessment">{d.assessment}</div>
                     {d.supporting.map((a, i) => <ClaimLine key={`s${i}`} a={a} onCite={openCite} />)}
                     {d.contradicting.map((a, i) => (
                       <div key={`c${i}`} className="claim">
@@ -216,14 +281,15 @@ export default function Page() {
 
             {s.workup.length > 0 && (
               <>
-                <h3>Proposed workup — coverage attached where the payer answered</h3>
+                <h3>Proposed workup <span className="sub">coverage attached where the payer answered</span></h3>
                 {s.workup.map((o) => (
                   <div key={o.id} className="opt">
                     <div className="title">{o.display} <span className="badge">{o.priority}</span></div>
-                    <div style={{ fontSize: 13 }}>{o.purpose}</div>
+                    <div className="purpose">{o.purpose}</div>
                     {o.sequenceNote && <div className="seq">⇄ {o.sequenceNote}</div>}
                     {o.benefit && (
                       <div className="ben">
+                        <div className="ben-label">Coverage facts</div>
                         {o.benefit.matched ? (
                           <>
                             plan {o.benefit.planActive ? 'ACTIVE' : 'INACTIVE'}
@@ -231,10 +297,10 @@ export default function Page() {
                             {o.benefit.deductibleRemaining && <> · deductible left <span className="money">{o.benefit.deductibleRemaining}</span></>}
                             {o.benefit.oopRemaining && <> · OOP left <span className="money">{o.benefit.oopRemaining}</span></>}
                             {o.benefit.messages.map((m, i) => <div key={i}>payer: “{m}”</div>)}
-                            <div>(reported by payer test response — estimate, not a guarantee)</div>
+                            <div className="caveat">(reported by payer test response — estimate, not a guarantee)</div>
                           </>
                         ) : (
-                          <>no service-specific benefit information returned</>
+                          <span className="caveat">no service-specific benefit information returned</span>
                         )}
                       </div>
                     )}
@@ -243,14 +309,16 @@ export default function Page() {
               </>
             )}
 
-            {s.createdResources.length > 0 && (
+            {(created.length > 0 || s.createdResources.length > 0) && (
               <>
-                <h3>Written to chart</h3>
-                {s.createdResources.map((r) => (
-                  <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
-                    {r.resourceType}/{r.id}
-                  </span>
-                ))}
+                <h3>Written to chart — click to inspect the real FHIR</h3>
+                <div>
+                  {[...created, ...s.createdResources].map((r) => (
+                    <span key={r.id} className="chip support" onClick={() => openCite(r.resourceType, r.id)}>
+                      {r.resourceType}/{r.id.slice(0, 8)}…
+                    </span>
+                  ))}
+                </div>
               </>
             )}
           </div>
@@ -258,16 +326,27 @@ export default function Page() {
 
         <div className="rail">
           <div className="controls">
+            <div className="rail-label">Chair’s bench</div>
             <div className="row">
               <button className="primary" disabled={!canAssemble} onClick={() => post('/api/session/assemble')}>
                 🩺 Assemble council
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
             </div>
+            <button
+              className={`primary ptt ${ptt.talking ? 'talking' : ''}`}
+              disabled={s.phase === 'case-ready'}
+              onPointerDown={ptt.start}
+              onPointerUp={ptt.stop}
+              onPointerLeave={ptt.stop}
+            >
+              {ptt.talking ? '🎙 LISTENING' : '🎙 HOLD to speak to the council'}
+              <span className="hint">{ptt.talking ? 'release when done' : 'press and hold — you are at the table'}</span>
+            </button>
             <div className="row">
               <input
                 type="text"
-                placeholder="Interject — you're at the table (push-to-talk = type here)"
+                placeholder="…or type your interjection"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
                 onKeyDown={(e) => {
@@ -292,13 +371,17 @@ export default function Page() {
                 <button onClick={() => post('/api/session/assemble')}>retry</button>
               </div>
             )}
+            <div className="guide">
+              <b>1</b> Assemble · <b>2</b> Council argues — listen · <b>3</b> Hold to speak (or type) ·{' '}
+              <b>4</b> Select the leading dx · <b>5</b> Review coverage · <b>6</b> Finalize
+            </div>
           </div>
 
           <div className="transcript" ref={transcriptRef}>
             {s.transcript.map((t, i) => (
               <div key={i} className={`turn ${t.role}`}>
                 <div className="who">{t.role === 'chair' ? 'House, M.D. (chair)' : t.role}</div>
-                <div>{t.text}</div>
+                <div className="said">{t.text}</div>
               </div>
             ))}
           </div>

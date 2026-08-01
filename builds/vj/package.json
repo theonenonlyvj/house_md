@@ -13,6 +13,7 @@
   "dependencies": {
     "@medplum/core": "^4.0.0",
     "@medplum/fhirtypes": "^4.0.0",
+    "@moss-dev/moss": "^1.4.1",
     "next": "^15.1.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
