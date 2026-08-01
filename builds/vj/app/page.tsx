@@ -155,6 +155,39 @@ function useMic() {
   return { state, toggle };
 }
 
+// The detective board: an SVG drawn server-side for the exact pixel size of the
+// whiteboard and re-drawn whenever the session version moves — new evidence, new board.
+// Each draw amends the board already hanging, so cards grow rather than reshuffle.
+function useBoard(version: number | undefined, on: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [svg, setSvg] = useState('');
+  const [drawing, setDrawing] = useState(false);
+  const [failed, setFailed] = useState('');
+  const drawnKey = useRef('');
+  useEffect(() => {
+    if (!on || version == null || !ref.current) return;
+    const r = ref.current.getBoundingClientRect();
+    const w = Math.round(r.width);
+    const h = Math.round(r.height);
+    if (w < 200 || h < 200) return;
+    const k = `${version}:${w}x${h}`;
+    if (drawnKey.current === k) return;
+    drawnKey.current = k;
+    let alive = true;
+    setDrawing(true);
+    fetch(`/api/whiteboard?w=${w}&h=${h}`)
+      .then((res) => res.json())
+      .then((d) => {
+        if (!alive) return;
+        if (d.svg) { setSvg(d.svg); setFailed(''); } else setFailed(d.error || 'board unavailable');
+      })
+      .catch(() => alive && setFailed('board unavailable'))
+      .finally(() => alive && setDrawing(false));
+    return () => { alive = false; };
+  }, [version, on]);
+  return { ref, svg, drawing, failed };
+}
+
 // ---- Presentation helpers (no logic). Seat roles and labels read seat DATA, never
 // the roster, so a persona/case swap reseats the room with zero code changes. ----
 
@@ -250,8 +283,12 @@ export default function Page() {
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [boardOn, setBoardOn] = useState(true);
   const mic = useMic();
   useChairAudio(audioOn, s?.activity === 'hearing you…');
+  // Nothing to pin until the panel has said something — no board on an empty case.
+  const boardUp = boardOn && !!s?.patient && (s.differential.length > 0 || s.contributions.length > 0 || s.transcript.length > 0);
+  const board = useBoard(s?.version, boardUp);
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -384,6 +421,9 @@ export default function Page() {
         <span className="name">house_md</span>
         <span className="spacer" />
         {status && <span className="activity">{status}</span>}
+        <button className="ghost" onClick={() => setBoardOn((v) => !v)} title="Evidence board — redrawn as the panel argues">
+          {boardOn ? 'Board' : 'Write-up'}
+        </button>
         <button className="ghost" onClick={() => { post('/api/session/reset'); setFinalized(null); setCreated([]); }}>
           Reset
         </button>
@@ -399,6 +439,40 @@ export default function Page() {
                 speaking={panelSlotSpeaking(slot, floorTurn, seats)}
               />
             ))}
+            <div className="foot">
+              {canConvene ? (
+                <button className="convene" onClick={convene}>
+                  Convene the panel
+                  <span className="sub">the panel reads the chart and joins with live voices — then present your case</span>
+                </button>
+              ) : (
+                <div className="foot-row">
+                  <button className={`ptt${mic.state === 'live' ? ' talking' : ''}`} onClick={mic.toggle}>
+                    <span className="avatar">YOU</span>
+                    <span className="ptt-text">
+                      <span className="ptt-label">
+                        {mic.state === 'live' ? 'Mic live — click to mute' : mic.state === 'muted' ? 'Mic muted — click to speak' : 'Enable your mic'}
+                      </span>
+                      <span className="ptt-sub">
+                        {mic.state === 'live'
+                          ? 'the panel hears you — speak to interrupt'
+                          : mic.state === 'muted'
+                            ? 'your seat, at the foot of the table'
+                            : 'one-time setup, then instant mute/unmute'}
+                      </span>
+                    </span>
+                  </button>
+                  {canFinalize && (
+                    <button className="write" onClick={finalize}>Write plan to chart</button>
+                  )}
+                </div>
+              )}
+              {s.error && (
+                <div className="errorbox">
+                  {s.error} <button onClick={() => post('/api/session/assemble')}>retry</button>
+                </div>
+              )}
+            </div>
           </div>
 
           <div className="whiteboard">
@@ -409,18 +483,35 @@ export default function Page() {
             )}
             {s.patient && (
               <>
-                <div className="wb-patient">
-                  <div className="case-name">{s.patient.name}</div>
-                  <div className="case-meta">
-                    {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
+                {/* The board pins the patient card itself — no header above it. */}
+                {!boardUp && (
+                  <div className="wb-patient">
+                    <div className="case-name">{s.patient.name}</div>
+                    <div className="case-meta">
+                      {s.features ? `${s.features.age} · ${s.features.sex} · ` : ''}DOB {s.patient.dob}
+                    </div>
+                    {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
                   </div>
-                  {s.features?.chiefComplaint && <div className="case-cc">“{s.features.chiefComplaint}”</div>}
-                </div>
+                )}
 
                 <div className="wb-body">
                 {yourMove && <div className="yourmove">{yourMove}</div>}
 
-                {evidence.length > 0 && (
+                {/* The board redraws the same record the write-up lists — show one or
+                    the other, never both. Toggle in the masthead. */}
+                {boardUp && (
+                  <div className="board" ref={board.ref}>
+                    {board.svg ? (
+                      <div className="board-svg" dangerouslySetInnerHTML={{ __html: board.svg }} />
+                    ) : (
+                      <div className="board-note placeholder">{board.failed || 'pinning the evidence…'}</div>
+                    )}
+                    {board.drawing && board.svg && <div className="board-badge">re-drawing…</div>}
+                    {board.failed && board.svg && <div className="board-badge err">{board.failed}</div>}
+                  </div>
+                )}
+
+                {!boardUp && evidence.length > 0 && (
                   <>
                     <div className="steps-label">From the record — cited live</div>
                     <div className="facts">
@@ -440,7 +531,7 @@ export default function Page() {
                   </>
                 )}
 
-                {leading && s.workup.length > 0 && (
+                {!boardUp && leading && s.workup.length > 0 && (
                   <div className="leadline">
                     <span className="leadline-label">Leading</span> {leading.display}
                   </div>
@@ -463,7 +554,7 @@ export default function Page() {
                   </>
                 )}
 
-                {s.workup.map((o) => (
+                {!boardUp && s.workup.map((o) => (
                   <div key={o.id} className="opt">
                     <div className="opt-head">
                       <span className="title">{o.display}</span>
@@ -503,40 +594,6 @@ export default function Page() {
             )}
           </div>
 
-          <div className="foot">
-            {canConvene ? (
-              <button className="convene" onClick={convene}>
-                Convene the panel
-                <span className="sub">the panel reads the chart and joins with live voices — then present your case</span>
-              </button>
-            ) : (
-              <div className="foot-row">
-                <button className={`ptt${mic.state === 'live' ? ' talking' : ''}`} onClick={mic.toggle}>
-                  <span className="avatar">YOU</span>
-                  <span className="ptt-text">
-                    <span className="ptt-label">
-                      {mic.state === 'live' ? 'Mic live — click to mute' : mic.state === 'muted' ? 'Mic muted — click to speak' : 'Enable your mic'}
-                    </span>
-                    <span className="ptt-sub">
-                      {mic.state === 'live'
-                        ? 'the panel hears you — speak to interrupt'
-                        : mic.state === 'muted'
-                          ? 'your seat, at the foot of the table'
-                          : 'one-time setup, then instant mute/unmute'}
-                    </span>
-                  </span>
-                </button>
-                {canFinalize && (
-                  <button className="write" onClick={finalize}>Write plan to chart</button>
-                )}
-              </div>
-            )}
-            {s.error && (
-              <div className="errorbox">
-                {s.error} <button onClick={() => post('/api/session/assemble')}>retry</button>
-              </div>
-            )}
-          </div>
         </section>
 
         <aside className="rail">

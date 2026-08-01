@@ -93,11 +93,10 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   display: grid;
   /* The room LEFT (plan on the table), transcript RIGHT. */
   grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
-  gap: 16px;
-  padding: 14px 18px 16px;
-  max-width: 1500px;
+  gap: 12px;
+  /* full-bleed: the room uses the whole screen, no side gutters */
+  padding: 12px 10px 12px;
   width: 100%;
-  margin: 0 auto;
 }
 .chamber { grid-column: 1; grid-row: 1; }
 .rail { grid-column: 2; grid-row: 1; }
@@ -164,7 +163,8 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   border: 1px solid var(--line);
   border-radius: 16px;
   box-shadow: inset 0 0 0 5px rgba(22, 35, 58, 0.02), var(--shadow-soft);
-  padding: 20px 24px 14px;
+  /* tight frame — the board gets the space */
+  padding: 10px 12px 10px;
 }
 .wb-empty { margin: auto; text-align: center; max-width: 380px; }
 .wb-patient {
@@ -198,9 +198,36 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 9px;
-  padding: 12px 2px 2px;
+  gap: 8px;
+  padding: 0;
 }
+
+/* the detective board — the same record, drawn as pinned cards and red string.
+   Fills the whiteboard exactly; the SVG is generated for these pixel dimensions. */
+.board {
+  position: relative;
+  flex: 1;
+  /* the scroll container would let flex squash this to nothing when the dx rows are up */
+  min-height: 320px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+}
+.board-svg, .board-svg svg { display: block; width: 100%; height: 100%; }
+.board-note { display: grid; place-items: center; height: 100%; text-align: center; }
+.board-badge {
+  position: absolute;
+  left: 12px;
+  bottom: 10px;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: rgba(22, 35, 58, 0.72);
+  color: #fff;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+.board-badge.err { background: rgba(165, 58, 64, 0.9); }
 
 /* chart facts, pinned to the board as they are cited */
 .facts {
@@ -239,11 +266,10 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 /* the panel — fixed cast strip at the top of the room */
 .experts {
   display: flex;
-  justify-content: center;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px 12px;
   flex-shrink: 0;
-  padding: 6px 4px 4px;
+  padding: 4px 4px 2px;
 }
 
 /* seats: avatar + brief label */
@@ -301,13 +327,19 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 .seat.reimb.speaking .seat-label { color: var(--teal-deep); }
 
 /* ---------- the foot: your seat, and only what the flow needs ---------- */
+/* The clinician's controls sit at the right end of the panel strip — the bottom of
+   the room belongs to the board. */
 .foot {
   display: flex;
-  flex-direction: column;
   align-items: center;
   gap: 8px;
-  padding-bottom: 2px;
+  margin-left: auto;
 }
+.foot .convene { flex-direction: row; gap: 8px; padding: 9px 20px; font-size: 14px; border-radius: 999px; }
+.foot .convene .sub { display: none; }
+.foot .ptt { padding: 7px 16px; }
+.foot .ptt-sub { display: none; }
+.foot .ptt-label { font-size: 13px; }
 .foot-row { display: flex; align-items: center; gap: 12px; }
 
 .convene {
