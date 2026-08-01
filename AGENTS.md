@@ -35,6 +35,17 @@ coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
 - On Vijay's machine, default `node` is v12 — prefix commands with
   `PATH="/opt/homebrew/opt/node/bin:$PATH"`. Other machines: use node ≥20.
 
+## Team coordination
+
+- Pull/rebase before each work block, commit small coherent slices, push promptly, and
+  never force-push shared work.
+- Keep council reasoning, coverage, voice, and UI behind the typed boundaries in the
+  canonical plan so parallel work does not collide.
+- Do not overwrite uncommitted teammate work. If ownership or a conflict is unclear,
+  stop and report the exact files involved.
+- The selected patient and UI copy remain data/configuration decisions, not logic
+  hardcoded into provider adapters.
+
 ## Scope gates (from the plan — respect them)
 
 - 1:00pm — DDx conversation works TEXT-first.
