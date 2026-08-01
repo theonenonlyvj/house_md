@@ -1,6 +1,19 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Image from 'next/image';
 import type { Argument, SessionState } from '../src/shared/types';
+
+const DOCTOR_AVATARS: Record<string, string> = {
+  'chair-house': '/avatars/house.png',
+  skeptic: '/avatars/skeptic.png',
+  reimbursement: '/avatars/reimbursement.png',
+  cardiology: '/avatars/cardiology.png',
+  nephrology: '/avatars/nephrology.png',
+  neurology: '/avatars/neurology.png',
+  'clin-pharm': '/avatars/clin-pharm.png',
+  endocrinology: '/avatars/endocrinology.png',
+  hematology: '/avatars/hematology.png',
+};
 
 // The council table. Decision support, not diagnosis: the council argues, the
 // clinician decides — and clicks every consequential transition themselves.
@@ -37,14 +50,16 @@ function useSession(): S | null {
 // Chair speech: pull the PCM stream and play through Web Audio. `interrupted` flips
 // when the session hears the clinician — we hard-flush the scheduled buffer so the
 // chair actually shuts up when interrupted instead of playing out its backlog.
-function useChairAudio(enabled: boolean, interrupted: boolean) {
+function useChairAudio(interrupted: boolean) {
   const flushRef = useRef<() => void>(() => {});
   useEffect(() => {
     if (interrupted) flushRef.current();
   }, [interrupted]);
   useEffect(() => {
-    if (!enabled) return;
     const ctx = new AudioContext({ sampleRate: 24000 });
+    const unlock = () => { void ctx.resume(); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
     const scheduled = new Set<AudioBufferSourceNode>();
     let nextAt = 0;
     let stop = false;
@@ -82,52 +97,63 @@ function useChairAudio(enabled: boolean, interrupted: boolean) {
         }
       } catch {}
     })();
-    return () => { stop = true; flushRef.current(); ctx.close(); };
-  }, [enabled]);
+    return () => {
+      stop = true;
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      flushRef.current();
+      void ctx.close();
+    };
+  }, []);
 }
 
-// Always-on mic with instant mute/unmute. Setup (permission + WS + worklet) happens
-// ONCE on first enable; after that the toggle just gates frames — zero latency, no
-// lost first words. While unmuted, audio streams continuously to the session's
-// nova-3 listen leg; its VAD handles turns and barge-in.
+// Always-on mic. Setup (permission + WS + worklet) happens on mount, then audio
+// streams continuously to the session's nova-3 listen leg; its VAD handles turns
+// and barge-in without another demo control or click.
 function useMic() {
-  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean; muted: boolean }>({ live: false, muted: true });
-  const [state, setState] = useState<'off' | 'muted' | 'live'>('off');
-  const toggle = useCallback(async () => {
-    const r = ref.current;
-    if (r.live) {
-      r.muted = !r.muted;
-      setState(r.muted ? 'muted' : 'live');
-      return;
-    }
-    try {
-      const ws = new WebSocket(`ws://${location.host}/ws/voice`);
-      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
-      });
-      const ctx = new AudioContext({ sampleRate: 24000 });
-      await ctx.resume(); // autoplay policy can leave it suspended → silent capture
-      await ctx.audioWorklet.addModule('/pcm-worklet.js');
-      const src = ctx.createMediaStreamSource(stream);
-      const node = new AudioWorkletNode(ctx, 'pcm-capture');
-      node.port.onmessage = (e) => {
-        const cur = ref.current;
-        if (!cur.ws || cur.ws.readyState !== 1) return;
-        // CONTINUOUS stream: mute sends zero-frames instead of stopping — Deepgram's
-        // turn detection breaks on stalled streams (>10s transcript delays), and
-        // resuming mid-stream eats the first words. Unmute = pure flag flip.
-        cur.ws.send(cur.muted ? new ArrayBuffer((e.data as ArrayBuffer).byteLength) : e.data);
-      };
-      src.connect(node);
-      ws.onclose = () => { ref.current.live = false; ref.current.muted = true; setState('off'); };
-      ref.current = { ws, ctx, stream, live: true, muted: false };
-      setState('live');
-    } catch {
-      setState('off');
-    }
+  const ref = useRef<{ ws?: WebSocket; ctx?: AudioContext; stream?: MediaStream; live: boolean }>({ live: false });
+  useEffect(() => {
+    let cancelled = false;
+    const unlock = () => { void ref.current.ctx?.resume(); };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+    const start = async () => {
+      const r = ref.current;
+      if (r.live) return;
+      try {
+        const ws = new WebSocket(`ws://${location.host}/ws/voice`);
+        await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+        if (cancelled) { ws.close(); return; }
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true },
+        });
+        if (cancelled) { stream.getTracks().forEach((track) => track.stop()); ws.close(); return; }
+        const ctx = new AudioContext({ sampleRate: 24000 });
+        await ctx.audioWorklet.addModule('/pcm-worklet.js');
+        const src = ctx.createMediaStreamSource(stream);
+        const node = new AudioWorkletNode(ctx, 'pcm-capture');
+        node.port.onmessage = (e) => {
+          const cur = ref.current;
+          if (!cur.ws || cur.ws.readyState !== 1) return;
+          cur.ws.send(e.data);
+        };
+        src.connect(node);
+        ws.onclose = () => { ref.current.live = false; };
+        ref.current = { ws, ctx, stream, live: true };
+      } catch {}
+    };
+    void start();
+    return () => {
+      cancelled = true;
+      window.removeEventListener('pointerdown', unlock);
+      window.removeEventListener('keydown', unlock);
+      const current = ref.current;
+      current.stream?.getTracks().forEach((track) => track.stop());
+      current.ws?.close();
+      if (current.ctx) void current.ctx.close();
+      ref.current = { live: false };
+    };
   }, []);
-  return { state, toggle };
 }
 
 // Presentation helpers (no logic): avatar initials + seat styling class per persona kind.
@@ -165,12 +191,11 @@ export default function Page() {
   const s = useSession();
   const [text, setText] = useState('');
   const [drawer, setDrawer] = useState<{ title: string; json: unknown } | null>(null);
-  const [audioOn, setAudioOn] = useState(false);
   const [finalized, setFinalized] = useState<string | null>(null);
   const [created, setCreated] = useState<{ resourceType: string; id: string }[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const mic = useMic();
-  useChairAudio(audioOn, s?.activity === 'hearing you…');
+  useMic();
+  useChairAudio(s?.activity === 'hearing you…');
 
   useEffect(() => {
     transcriptRef.current?.scrollTo({ top: 999999 });
@@ -221,7 +246,6 @@ export default function Page() {
         <span className="badge phase">{s.phase}</span>
         {s.activity && <span className="activity">{s.activity}</span>}
         <span style={{ flex: 1 }} />
-        <button onClick={() => setAudioOn((v) => !v)}>{audioOn ? '🔊 chair audio on' : '🔇 enable chair audio'}</button>
         <span className="tagline">the council argues, the clinician decides</span>
       </div>
 
@@ -239,8 +263,14 @@ export default function Page() {
                 style={{ left: `calc(${x}% - 79px)`, top: `calc(${y}% - 44px)` }}
                 title={seat.reasons.join(' · ')}
               >
-                <div className="avatar">
-                  {seat.status === 'empty' ? '?' : seat.status === 'human' ? 'YOU' : initials(seat.personaName)}
+                <div className={`avatar${seat.personaId && DOCTOR_AVATARS[seat.personaId] ? ' avatar-photo' : ''}`}>
+                  {seat.status === 'empty'
+                    ? '?'
+                    : seat.status === 'human'
+                      ? 'YOU'
+                      : seat.personaId && DOCTOR_AVATARS[seat.personaId]
+                        ? <Image src={DOCTOR_AVATARS[seat.personaId]} alt="" width={34} height={34} />
+                        : initials(seat.personaName)}
                 </div>
                 <div className="who">{seat.status === 'empty' ? 'EMPTY SEAT' : seat.personaName}</div>
                 <div className="spec">{seat.specialty.replace(/-/g, ' ')}</div>
@@ -361,16 +391,6 @@ export default function Page() {
               </button>
               <button onClick={() => { post('/api/session/reset'); setFinalized(null); }}>reset</button>
             </div>
-            <button
-              className={`primary ptt ${mic.state === 'live' ? 'talking' : ''}`}
-              disabled={s.phase === 'case-ready'}
-              onClick={mic.toggle}
-            >
-              {mic.state === 'live' ? '🔴 MIC LIVE — click to mute' : mic.state === 'muted' ? '🎙 Mic muted — click to speak' : '🎙 Enable mic'}
-              <span className="hint">
-                {mic.state === 'live' ? 'the council hears you — you can interrupt the chair' : 'one-time setup, then instant mute/unmute'}
-              </span>
-            </button>
             <div className="row">
               <input
                 type="text"

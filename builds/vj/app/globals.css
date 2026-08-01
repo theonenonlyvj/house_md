@@ -168,7 +168,10 @@ input[type='text']::placeholder { color: var(--muted); }
   color: #fff;
   background: var(--ink);
   border: 1px solid rgba(22, 35, 58, 0.25);
+  overflow: hidden;
 }
+.seat .avatar.avatar-photo { border: 2px solid var(--line); box-shadow: 0 0 0 1px rgba(22, 35, 58, 0.15); }
+.seat .avatar.avatar-photo img { width: 100%; height: 100%; object-fit: cover; }
 .seat .who { font-weight: 700; font-size: 13px; letter-spacing: 0.01em; }
 .seat .spec {
   color: var(--muted);
