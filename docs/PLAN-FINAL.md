@@ -69,11 +69,13 @@ legacy-EHR look, generic chatbot, or theatrical dark-mode AI demo.
   of list: the chair, the skeptic (argument style designed to probe/overreach so a
   *warranted* chair challenge emerges without scripting), and the **patient services /
   reimbursement specialist** (speaks the Stedi facts at plan time). Case-driven
-  specialist seats fill from the list. **Constraint the list must preserve:** it must
-  NOT cover every specialty the default case requires — the placeholder default
-  (no hematology, unit-test-asserted required for Jane Doe's features) keeps the
-  empty-seat beat real; if the final list seats hematology, another genuinely-required
-  specialty must be absent. All config not code. Each persona: id, name, specialty,
+  specialist seats fill from the list. **Duplicate specialties are allowed** — two
+  seats of the same specialty is fine (e.g. the human clinician plus an AI persona of
+  the same specialty; honest disagreement between them is good drama). The empty seat
+  emerges honestly from list-vs-case: if the final list covers everything this case
+  requires, the beat simply doesn't fire for this case — accepted. (Placeholder
+  default until Vijay's list lands: no hematology, unit-test-asserted required for
+  Jane Doe's features.) All config not code. Each persona: id, name, specialty,
   argument style, system prompt, voice id. The managing clinician's own specialty is
   config and its seat is filled by the human at the table.
 - **Audible:** specialists speak in their own voices, scoped for the video — up to
