@@ -3,7 +3,9 @@
 
 export type SessionPhase =
   | 'case-ready'
-  | 'listening'
+  | 'opening' // agent connected; the chair asks the clinician for the case
+  | 'listening' // mic armed; the clinician is presenting
+  | 'assembling' // the panel is being seated and named, one at a time
   | 'reasoning'
   | 'retrieving-evidence'
   | 'differential-ready'
@@ -22,7 +24,10 @@ export interface CaseFeatures {
   age: number;
   sex: Sex;
   chiefComplaint: string;
+  /** Ranked by evidence weight — the loudest system first. Drives seating order. */
   organSystems: string[]; // 'cardiac' | 'renal' | 'neuro' | 'endocrine' | 'heme' | ...
+  /** system → the terms that actually matched, so every seat can show its receipts. */
+  systemEvidence?: Record<string, string[]>;
   activeMeds: string[];
   redFlags: string[];
 }
@@ -34,8 +39,13 @@ export interface Persona {
   name: string;
   specialty: string;
   kind: PersonaKind;
-  style: string; // one-line argument style, feeds the system prompt
+  /** What this specialist looks at FIRST in an undifferentiated case. Feeds the prompt. */
+  lens: string;
+  /** Argumentative temperament and rhetorical habit — never case knowledge. */
+  style: string;
   voice?: string; // Aura voice id
+  voiceNote?: string; // human-readable signature, for the roster UI
+  avatar: string;
 }
 
 export type SeatStatus = 'seated' | 'empty' | 'human';
@@ -46,6 +56,9 @@ export interface Seat {
   personaId?: string;
   personaName?: string;
   reasons: string[]; // cite case features — rendered in UI (Guardrail #1 is auditable)
+  // Set when the chair names this seat during assembly. The room fills in the order
+  // they are announced, so the UI reveal is driven by the actual voice, not a timer.
+  arrivedAt?: number;
 }
 
 export interface SeatingDecision {
@@ -132,7 +145,33 @@ export interface PatientBanner {
   medplumId?: string;
 }
 
+// ---- The notepad: the scribe's running minutes ----
+// Written from tool calls as they land, never by a second model. Every point keeps
+// the citation the claim carried, so the notepad and the argument can't drift apart.
+
+export type NoteKind =
+  | 'evidence' // a chart fact the panel put on the record
+  | 'position' // what a specialist argued
+  | 'direction' // the leading hypothesis, and who moved it
+  | 'plan' // a proposed next step
+  | 'coverage' // what the eligibility check actually returned
+  | 'written'; // posted to the chart
+
+export interface NoteEntry {
+  id: string;
+  kind: NoteKind;
+  speaker?: string; // short label — PULMO, HOUSE, YOU
+  personaId?: string;
+  text: string;
+  detail?: string; // second line: purpose, assessment, sequencing note
+  cites: EvidenceRef[]; // resolved citations, so the note is auditable
+  provenance?: 'cited' | 'conjecture';
+  priority?: 'now' | 'next' | 'later'; // plan entries only
+  at: number;
+}
+
 export interface SessionState {
+  caseId: string; // which case in src/case/cases.ts this session is running
   phase: SessionPhase;
   patient?: PatientBanner;
   features?: CaseFeatures;
@@ -141,8 +180,15 @@ export interface SessionState {
   contributions: SpecialistContribution[];
   differential: DifferentialItem[];
   workup: CareOption[];
+  notepad: NoteEntry[];
   selectedHypothesisId?: string;
   createdResources: CreatedResource[];
+  // Pulled once when the chart loads so the provider page can show coverage before
+  // the consult starts; the same parsed result is what the advocate speaks from.
+  benefits?: BenefitFacts;
+  // Who is audibly speaking RIGHT NOW — set when playback of their line starts and
+  // cleared when it ends. The seat highlight follows this, not a timeout heuristic.
+  speakingPersonaId?: string;
   activity?: string; // visible activity label — nothing ever silently spins
   error?: string;
 }

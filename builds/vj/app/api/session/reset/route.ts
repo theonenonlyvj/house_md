@@ -5,9 +5,16 @@ import { resetChartCache } from '../../../../src/server-lib/chart';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST() {
+export async function POST(req: Request) {
+  let caseId: string | undefined;
+  try {
+    const body = (await req.json()) as { caseId?: unknown };
+    if (typeof body?.caseId === 'string' && body.caseId) caseId = body.caseId;
+  } catch {
+    // empty body → reset onto the same case
+  }
   closeAgent();
   resetChartCache();
-  resetSession();
+  resetSession(caseId);
   return NextResponse.json({ ok: true });
 }

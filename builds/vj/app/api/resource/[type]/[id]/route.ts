@@ -11,7 +11,7 @@ export async function GET(_req: Request, ctx: { params: Promise<{ type: string; 
     return NextResponse.json({
       resourceType: type,
       id,
-      note: 'DEV-LOCAL chart resource — hosted Medplum patient pending (plug Noah’s seed into src/case/default-case.ts)',
+      note: 'DEV-LOCAL chart resource — this patient is not in Medplum. Seed one with `node scripts/seed-case.mjs --all` and pick it in src/case/cases.ts.',
     });
   }
   try {

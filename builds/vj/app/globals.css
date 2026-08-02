@@ -1,18 +1,25 @@
-/* Academic case conference, projected in a bright room.
-   Ivory base, deep ink text, one muted teal accent; brass reserved for the
-   reimbursement seat; green/red reserved for outcomes. Calm bright clinical
-   instrument — never casino felt, legacy EHR, or dark-mode demo.
+/* THE CONSULT ROOM.
+   A case conference convened on demand, in a bright room. Ivory base, deep ink,
+   one muted teal accent; brass for coverage, red reserved for chart flags and
+   urgency. Calm clinical instrument — never casino felt, legacy EHR, or dark demo.
 
-   Layout contract: ONE screen, no page scroll. A long rectangular table —
-   the chair at the head, you at the foot with the microphone, experts along
-   the sides as brief name pills. Right rail: live transcript over next steps.
-   The speaking seat's ring pulses with live audio via --audio-level (0..1),
-   published by the audio graph's analyser. */
+   TWO TYPOGRAPHIC REGISTERS, and the distinction carries meaning:
+     THE RECORD  — mono, tabular, dated. Anything pulled out of FHIR.
+     THE ARGUMENT — serif and sans. Anything a person or a persona asserted.
+   Citations are where the two touch: a mono E-code inside a serif claim is the
+   seam between what was said and what the chart actually holds.
+
+   Layout contract: ONE screen, no page scroll. The panel across the top, the
+   scribe's notepad beneath it, live transcript in the right rail. The speaking
+   seat's ring pulses with real audio via --audio-level (0..1), published by the
+   playback graph's analyser. */
+
 :root {
   --bg: #f6f4ee;
   --panel: #fffefa;
   --ink: #16233a;
   --muted: #5f6b7c;
+  --faint: #8b94a3;
   --line: #e0dbcf;
   --line-cool: #dfe4e8;
   --teal: #0f6d76;
@@ -24,14 +31,18 @@
   --good-soft: #e6f2ea;
   --bad: #a53a40;
   --bad-soft: #f8e9e9;
-  --table-1: #faf8f2;
-  --table-2: #efe9db;
-  --table-3: #e7dfcd;
+  /* the scribe's pad — warmer than the panels, so it reads as paper on a desk */
+  --pad: #fdfbf4;
+  --pad-line: #ece4d2;
+  --pad-margin: #c9857f;
+
   --serif: 'Iowan Old Style', 'Palatino', 'Palatino Linotype', Georgia, serif;
   --sans: -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
   --shadow-soft: 0 1px 2px rgba(22, 35, 58, 0.05), 0 6px 18px rgba(22, 35, 58, 0.06);
   --audio-level: 0;
 }
+
 * { box-sizing: border-box; margin: 0; }
 html { -webkit-font-smoothing: antialiased; height: 100%; }
 body {
@@ -82,24 +93,18 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 }
 
 /* ---------- app frame ---------- */
-.app {
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-}
+.app { height: 100vh; display: flex; flex-direction: column; }
 .main {
   flex: 1;
   min-height: 0;
   display: grid;
-  /* The room LEFT (plan on the table), transcript RIGHT. */
-  grid-template-columns: minmax(0, 1fr) minmax(420px, 500px);
+  grid-template-columns: minmax(0, 1fr) minmax(380px, 440px);
   gap: 12px;
-  /* full-bleed: the room uses the whole screen, no side gutters */
-  padding: 12px 10px 12px;
+  padding: 12px 12px 12px;
   width: 100%;
 }
-.chamber { grid-column: 1; grid-row: 1; }
-.rail { grid-column: 2; grid-row: 1; }
+.chamber { grid-column: 1; grid-row: 1; display: flex; flex-direction: column; gap: 12px; min-height: 0; min-width: 0; }
+.rail { grid-column: 2; grid-row: 1; display: grid; grid-template-rows: minmax(0, 1fr); min-height: 0; min-width: 0; }
 
 /* ---------- masthead ---------- */
 .masthead {
@@ -113,7 +118,7 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
 .masthead .name {
   font-family: var(--serif);
   font-weight: 700;
-  font-size: 20px;
+  font-size: 19px;
   letter-spacing: 0.01em;
 }
 .masthead .patient {
@@ -122,17 +127,25 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   border-left: 1px solid var(--line);
   padding-left: 14px;
 }
+.masthead .patient .pmeta {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-left: 8px;
+}
 .badge.syn {
-  font-size: 10.5px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
+  font-family: var(--sans);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
   text-transform: uppercase;
-  padding: 2px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
   background: var(--brass-soft);
   color: var(--brass);
   border: 1px solid rgba(150, 117, 31, 0.35);
   white-space: nowrap;
+  margin-left: 8px;
 }
 .activity {
   font-size: 12.5px;
@@ -141,280 +154,391 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 340px;
+  max-width: 360px;
 }
 
-/* ---------- the chamber: whiteboard / experts / foot ---------- */
-.chamber {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-  min-height: 0;
-  min-width: 0;
-}
-/* THE WHITEBOARD — the case, written up live from the Medplum record */
-.whiteboard {
-  flex: 1;
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+/* ================= THE PANEL ================= */
+.panelstage {
+  flex-shrink: 0;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
-  box-shadow: inset 0 0 0 5px rgba(22, 35, 58, 0.02), var(--shadow-soft);
-  /* tight frame — the board gets the space */
-  padding: 10px 12px 10px;
-}
-.wb-empty { margin: auto; text-align: center; max-width: 380px; }
-.wb-patient {
-  text-align: center;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line-cool);
-}
-.case-name {
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: 19px;
-  letter-spacing: 0.01em;
-}
-.case-meta {
-  font-size: 11.5px;
-  color: var(--muted);
-  letter-spacing: 0.03em;
-  margin-top: 3px;
-}
-.case-cc {
-  font-family: var(--serif);
-  font-style: italic;
-  font-size: 12.5px;
-  color: var(--ink);
-  line-height: 1.5;
-  margin-top: 7px;
-}
-.wb-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
+  box-shadow: var(--shadow-soft);
+  padding: 14px 16px 12px;
+  min-height: 148px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 0;
+  justify-content: center;
 }
-
-/* the detective board — the same record, drawn as pinned cards and red string.
-   Fills the whiteboard exactly; the SVG is generated for these pixel dimensions. */
-.board {
-  position: relative;
-  flex: 1;
-  /* the scroll container would let flex squash this to nothing when the dx rows are up */
-  min-height: 320px;
-  border-radius: 12px;
-  overflow: hidden;
-  border: 1px solid var(--line);
-  /* the cork is a photo; the SVG on top is transparent and draws only cards + string */
-  background: #c19a70 url('/cork.jpg') center / cover;
-  box-shadow: inset 0 0 40px rgba(60, 35, 12, 0.28);
-}
-.board-svg, .board-svg svg { display: block; width: 100%; height: 100%; }
-.board-note { display: grid; place-items: center; height: 100%; text-align: center; }
-.board-badge {
-  position: absolute;
-  left: 12px;
-  bottom: 10px;
-  font-size: 10.5px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  background: rgba(22, 35, 58, 0.72);
-  color: #fff;
-  padding: 3px 9px;
-  border-radius: 999px;
-}
-.board-badge.err { background: rgba(165, 58, 64, 0.9); }
-
-/* chart facts, pinned to the board as they are cited */
-.facts {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 8px;
-}
-.fact {
+.stagehead {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 3px;
-  text-align: left;
-  white-space: normal;
-  background: #fbfaf5;
-  border: 1px solid var(--line-cool);
-  border-radius: 10px;
-  padding: 8px 10px;
-  font-size: 12px;
-  line-height: 1.45;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 12px;
 }
-.fact:hover { border-color: var(--teal); }
-.fact-alias {
+.stagelabel {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--good);
-  background: var(--good-soft);
-  border: 1px solid rgba(30, 111, 66, 0.25);
-  border-radius: 999px;
-  padding: 1px 7px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--faint);
 }
-.fact-text { color: var(--ink); }
-.fact-date { font-size: 10.5px; color: var(--muted); }
+.stagenote { font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
-/* the panel — fixed cast strip at the top of the room */
-.experts {
+/* The room fills outward from the centre as each chair lands. One row, always:
+   a panel that wraps reads as two groups, and orphans whoever landed last. */
+.seats {
   display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-shrink: 0;
-  padding: 4px 4px 2px;
+  flex-wrap: nowrap;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 8px;
 }
+.waiting {
+  display: grid;
+  place-items: center;
+  gap: 6px;
+  text-align: center;
+  padding: 14px 8px;
+}
+.waiting .cue {
+  font-family: var(--serif);
+  font-size: 17px;
+  color: var(--ink);
+}
+.waiting .cuesub { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
 
-/* seats: avatar + brief label */
+/* seat: avatar, name, and the reason it was seated — receipts under every chair */
 .seat {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 5px;
-  background: var(--panel);
+  gap: 6px;
+  /* shrinks to keep the panel on one line as the room fills */
+  flex: 0 1 126px;
+  min-width: 0;
+  padding: 10px 6px 9px;
   border: 1px solid var(--line);
-  border-radius: 12px;
-  padding: 8px 10px 7px;
-  min-width: 68px;
+  border-radius: 13px;
+  background: var(--panel);
   box-shadow: var(--shadow-soft);
-  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+  transition: border-color 200ms ease-out, box-shadow 200ms ease-out, transform 260ms cubic-bezier(0.2, 0.8, 0.3, 1), opacity 200ms ease-out, filter 260ms ease-out;
 }
 .seat-avatar {
-  width: 48px;
-  height: 48px;
+  width: 54px;
+  height: 54px;
   border-radius: 50%;
   overflow: hidden;
   border: 2px solid var(--line);
   background: var(--ink);
-  box-shadow: 0 1px 3px rgba(22, 35, 58, 0.12);
+  box-shadow: 0 1px 3px rgba(22, 35, 58, 0.14);
+  flex: 0 0 54px;
 }
-.seat-avatar img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  display: block;
-}
+.seat-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .seat-label {
-  font-size: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.07em;
   line-height: 1;
   color: var(--ink);
 }
-.seat.chair .seat-avatar { border-color: rgba(15, 109, 118, 0.55); }
-.seat.chair .seat-label {
-  font-family: var(--serif);
-  font-size: 11px;
-  color: var(--teal-deep);
+.seat-why {
+  font-size: 9.5px;
+  line-height: 1.35;
+  color: var(--faint);
+  text-align: center;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
-.seat.reimb { background: var(--brass-soft); border-color: rgba(150, 117, 31, 0.35); }
+.seat.chair .seat-avatar { border-color: rgba(15, 109, 118, 0.5); }
+.seat.chair .seat-label { color: var(--teal-deep); }
+.seat.reimb { background: var(--brass-soft); border-color: rgba(150, 117, 31, 0.3); }
 .seat.reimb .seat-label { color: #7d6420; }
+
+/* An expertise the bench cannot supply. Shown, stamped, never quietly dropped. */
+.seat.empty {
+  border-style: dashed;
+  border-color: rgba(165, 58, 64, 0.45);
+  background: var(--bad-soft);
+}
+.seat.empty .seat-avatar { filter: grayscale(1) contrast(0.7); opacity: 0.4; border-color: rgba(165, 58, 64, 0.3); }
+.seat.empty .seat-label { color: var(--bad); }
+.seat.empty .seat-why { color: #a8797c; }
+.seat-stamp {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--bad);
+  border: 1px solid rgba(165, 58, 64, 0.4);
+  border-radius: 3px;
+  padding: 1px 5px;
+}
+
+/* SPEAKING: the floor belongs to one seat. It lifts; the room recedes around it. */
+.seats.hasfloor .seat:not(.speaking) { filter: saturate(0.45) opacity(0.62); transform: scale(0.965); }
 .seat.speaking {
   border-color: var(--teal);
+  transform: translateY(-5px) scale(1.03);
   box-shadow:
-    0 0 0 calc(3px + var(--audio-level) * 14px) rgba(15, 109, 118, calc(0.16 + var(--audio-level) * 0.3)),
-    var(--shadow-soft);
+    0 0 0 calc(3px + var(--audio-level) * 13px) rgba(15, 109, 118, calc(0.15 + var(--audio-level) * 0.28)),
+    0 10px 24px rgba(22, 35, 58, 0.12);
 }
 .seat.speaking .seat-avatar { border-color: var(--teal); }
 .seat.speaking .seat-label { color: var(--teal-deep); }
-.seat.reimb.speaking .seat-label { color: var(--teal-deep); }
 
-/* ---------- the foot: your seat, and only what the flow needs ---------- */
-/* The clinician's controls sit at the right end of the panel strip — the bottom of
-   the room belongs to the board. */
+/* ARRIVAL — the signature moment. Each chair lands on its own beat, paced by the
+   server as the chair names it, so the reveal tracks the actual voice. */
+@media (prefers-reduced-motion: no-preference) {
+  .seat.arriving { animation: arrive 520ms cubic-bezier(0.16, 0.9, 0.3, 1) both; }
+  @keyframes arrive {
+    0%   { opacity: 0; transform: translateY(-22px) scale(0.82); }
+    62%  { opacity: 1; transform: translateY(3px) scale(1.02); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .seat.arriving .seat-avatar { animation: settle 520ms cubic-bezier(0.16, 0.9, 0.3, 1) both; }
+  @keyframes settle {
+    0% { box-shadow: 0 0 0 10px rgba(15, 109, 118, 0.22); }
+    100% { box-shadow: 0 1px 3px rgba(22, 35, 58, 0.14); }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seat.arriving { animation: none; }
+}
+
+/* ================= THE NOTEPAD ================= */
+/* The scribe's running minutes. Written from the tool calls as they land, so it
+   cannot drift from what the panel actually argued. Every point keeps its
+   citation; anything uncited is stamped, not hidden. */
+.notepad {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--pad);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+  position: relative;
+}
+/* one margin rule, like a legal pad — the only skeuomorphic move on the page */
+.notepad::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 46px;
+  width: 1px;
+  background: var(--pad-margin);
+  opacity: 0.35;
+  pointer-events: none;
+}
+.padhead {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 11px 16px 9px 16px;
+  border-bottom: 1px solid var(--pad-line);
+  flex-shrink: 0;
+}
+.padtitle {
+  font-family: var(--serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.padcount { font-family: var(--mono); font-size: 11px; color: var(--faint); }
+.padbody { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 0 14px; }
+.padempty { padding: 26px 20px 26px 60px; max-width: 460px; }
+
+.padsection {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+  padding: 14px 16px 5px 60px;
+}
+.padsection:first-child { padding-top: 8px; }
+
+.note {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 0 10px;
+  padding: 5px 16px 5px 0;
+  align-items: baseline;
+  border-bottom: 1px solid var(--pad-line);
+}
+.note:last-child { border-bottom: 0; }
+.note-who {
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-align: right;
+  padding-top: 3px;
+}
+.note-main { min-width: 0; padding-left: 14px; }
+.note-text { font-size: 13.5px; line-height: 1.5; }
+.note-detail { font-size: 11.5px; color: var(--muted); line-height: 1.45; margin-top: 2px; }
+
+/* plan entries are numbered and carry urgency; key points are not a sequence */
+.note.plan .note-who { font-family: var(--mono); color: var(--teal-deep); }
+.prio {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  padding: 1px 6px;
+  margin-left: 8px;
+  vertical-align: 2px;
+  white-space: nowrap;
+}
+.prio.now { background: var(--bad); color: #fff; }
+.prio.next { border: 1px solid var(--teal); color: var(--teal-deep); }
+.prio.later { border: 1px solid var(--line); color: var(--muted); }
+
+.note.direction .note-text { font-family: var(--serif); font-size: 14.5px; font-weight: 700; }
+.note.coverage .note-text { font-family: var(--mono); font-size: 12.5px; }
+.note.coverage .note-who { color: var(--brass); }
+.note.evidence .note-text { font-size: 12.5px; color: var(--muted); }
+
+/* citations: mono E-codes, the seam between the claim and the record */
+.cites { display: inline-flex; flex-wrap: wrap; gap: 4px; margin-left: 7px; vertical-align: 1px; }
+.cite {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--good);
+  background: var(--good-soft);
+  border: 1px solid rgba(30, 111, 66, 0.28);
+  border-radius: 4px;
+  padding: 1px 5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.cite:hover { border-color: var(--good); box-shadow: 0 1px 4px rgba(30, 111, 66, 0.2); }
+.conjecture {
+  font-family: var(--mono);
+  font-size: 8.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--bad);
+  border: 1px solid rgba(165, 58, 64, 0.4);
+  border-radius: 3px;
+  padding: 1px 5px;
+  margin-left: 7px;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .note { animation: ink 260ms ease-out both; }
+  @keyframes ink {
+    from { opacity: 0; transform: translateY(-3px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+}
+
+/* ---------- the differential, when it is the clinician's move ---------- */
+.dxblock { padding: 4px 16px 10px 60px; display: flex; flex-direction: column; gap: 6px; }
+.dxrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+  border: 1px solid var(--line-cool);
+  background: var(--panel);
+  border-radius: 10px;
+  padding: 9px 12px;
+  white-space: normal;
+}
+.dxrow:disabled { opacity: 1; }
+.dxrow.leading { border-color: var(--teal); background: var(--teal-soft); }
+.dxrow .rank {
+  font-family: var(--mono);
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 11px;
+  color: #fff;
+  background: var(--ink);
+}
+.dxrow.leading .rank { background: var(--teal); }
+.dxrow .dx-name { font-family: var(--serif); font-weight: 700; font-size: 14px; }
+.dxrow .dx-why { font-size: 11.5px; color: var(--muted); }
+
+/* ---------- the foot: your seat and the one action available ---------- */
 .foot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.convene {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
-}
-.foot .convene { flex-direction: row; gap: 8px; padding: 9px 20px; font-size: 14px; border-radius: 999px; }
-.foot .convene .sub { display: none; }
-.foot .ptt { padding: 7px 16px; }
-.foot .ptt-sub { display: none; }
-.foot .ptt-label { font-size: 13px; }
-.foot-row { display: flex; align-items: center; gap: 12px; }
-
-.convene {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 3px;
   background: var(--teal);
   border: 2px solid var(--teal-deep);
   color: #fff;
-  border-radius: 15px;
-  padding: 14px 36px;
-  font-size: 16px;
+  border-radius: 999px;
+  padding: 11px 24px;
+  font-size: 15px;
   font-weight: 700;
-  letter-spacing: 0.01em;
   box-shadow: 0 2px 0 var(--teal-deep), var(--shadow-soft);
 }
-.convene:hover { background: var(--teal-deep); }
-.convene .sub { font-size: 11px; font-weight: 500; opacity: 0.85; letter-spacing: 0.03em; }
+.convene:hover:not(:disabled) { background: var(--teal-deep); }
 
 .ptt {
   display: flex;
   align-items: center;
   gap: 11px;
-  padding: 9px 22px;
+  padding: 9px 20px;
   border-radius: 999px;
   border: 2px solid var(--teal-deep);
   background: var(--teal);
   color: #fff;
   user-select: none;
-  touch-action: none;
   box-shadow: 0 2px 0 var(--teal-deep), var(--shadow-soft);
 }
 .ptt:hover:not(:disabled) { background: var(--teal-deep); border-color: var(--teal-deep); }
 .ptt:active:not(:disabled) { transform: translateY(1px); box-shadow: 0 1px 0 var(--teal-deep); }
 .ptt .avatar {
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
   border-radius: 50%;
   display: grid;
   place-items: center;
   background: var(--panel);
   color: var(--teal-deep);
   border: 2px solid #fff;
-  font-size: 10.5px;
+  font-family: var(--mono);
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.02em;
 }
 .ptt-text { display: flex; flex-direction: column; text-align: left; }
-.ptt-label { font-size: 14px; font-weight: 700; letter-spacing: 0.01em; }
-.ptt-sub { font-size: 10.5px; font-weight: 500; opacity: 0.85; letter-spacing: 0.04em; }
-.ptt.talking {
-  background: var(--bad);
-  border-color: #7f2c31;
-  box-shadow: 0 2px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
-}
-.ptt.talking:hover:not(:disabled),
-.ptt.talking:active:not(:disabled) {
-  background: var(--bad);
-  border-color: #7f2c31;
-  box-shadow: 0 2px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
-}
-.ptt.talking:active:not(:disabled) {
-  transform: translateY(1px);
-  box-shadow: 0 1px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18);
-}
-.ptt.talking:focus-visible {
-  outline: 2px solid #7f2c31;
-  outline-offset: 2px;
-}
+.ptt-label { font-size: 13.5px; font-weight: 700; }
+.ptt-sub { font-size: 10.5px; font-weight: 500; opacity: 0.85; letter-spacing: 0.03em; }
+.ptt.talking { background: var(--bad); border-color: #7f2c31; box-shadow: 0 2px 0 #7f2c31, 0 0 0 5px rgba(165, 58, 64, 0.18); }
+.ptt.talking:hover:not(:disabled) { background: var(--bad); border-color: #7f2c31; }
 .ptt.talking .avatar { color: var(--bad); }
+.ptt.talking:focus-visible { outline: 2px solid #7f2c31; outline-offset: 2px; }
 @media (prefers-reduced-motion: no-preference) {
   .ptt.talking { animation: listening 1.4s ease-in-out infinite; }
   @keyframes listening {
@@ -427,35 +551,43 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   background: var(--good-soft);
   color: var(--good);
   font-weight: 700;
-  border-radius: 11px;
-  padding: 11px 18px;
+  border-radius: 999px;
+  padding: 10px 18px;
 }
 .write:hover { border-color: var(--good); box-shadow: 0 1px 6px rgba(30, 111, 66, 0.18); }
 
+.yourmove {
+  font-family: var(--serif);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--teal-deep);
+  background: var(--teal-soft);
+  border: 1px solid rgba(15, 109, 118, 0.35);
+  border-radius: 999px;
+  padding: 8px 16px;
+  line-height: 1.4;
+}
 .errorbox {
   background: var(--bad-soft);
   color: var(--bad);
   border: 1px solid rgba(165, 58, 64, 0.3);
   border-radius: 9px;
-  padding: 7px 10px;
+  padding: 7px 11px;
   font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-.okline { font-size: 12.5px; color: var(--good); font-weight: 600; }
+.okline { font-family: var(--mono); font-size: 12px; color: var(--good); font-weight: 600; }
 
-/* ---------- right rail: transcript over next steps ---------- */
-.rail {
-  display: grid;
-  grid-template-rows: minmax(0, 1fr);
-  min-height: 0;
-  min-width: 0;
-}
+/* ---------- right rail: the transcript ---------- */
 .panel {
   display: flex;
   flex-direction: column;
   min-height: 0;
   background: var(--panel);
   border: 1px solid var(--line);
-  border-radius: 13px;
+  border-radius: 14px;
   box-shadow: var(--shadow-soft);
 }
 .panel-title {
@@ -468,8 +600,9 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--muted);
-  padding: 10px 15px 8px;
+  padding: 11px 16px 9px;
   border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
 }
 .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); }
 @media (prefers-reduced-motion: no-preference) {
@@ -479,148 +612,41 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
     50% { box-shadow: 0 0 0 5px rgba(15, 109, 118, 0); }
   }
 }
-.panel-body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 12px 15px;
-  display: flex;
-  flex-direction: column;
-  gap: 9px;
-}
-
-/* transcript: court record */
 .transcript {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 12px 15px;
+  padding: 13px 16px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  font-size: 13px;
+  gap: 11px;
+  font-size: 13.5px;
 }
-.turn { display: grid; grid-template-columns: 76px 1fr; gap: 10px; align-items: baseline; }
+.turn { display: grid; grid-template-columns: 64px 1fr; gap: 10px; align-items: baseline; }
 .turn-who {
+  font-family: var(--mono);
   font-weight: 700;
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 0.08em;
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  color: var(--faint);
   text-align: right;
-  line-height: 1.4;
+  line-height: 1.5;
 }
 .turn-said { line-height: 1.55; }
 .turn.chair .turn-who { color: var(--teal-deep); }
+.turn.chair .turn-said { font-family: var(--serif); font-size: 14px; }
 .turn.clinician .turn-who { color: var(--ink); }
 .turn.clinician .turn-said { font-weight: 600; }
+.turn.speaking .turn-said { background: var(--teal-soft); border-radius: 6px; box-shadow: 0 0 0 4px var(--teal-soft); }
 
-/* next steps */
-.steps-label {
-  font-family: var(--serif);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-top: 2px;
-}
-.leadline {
-  font-family: var(--serif);
-  font-size: 14.5px;
-  font-weight: 700;
-  background: var(--teal-soft);
-  border: 1px solid rgba(15, 109, 118, 0.3);
-  box-shadow: inset 3px 0 0 var(--teal);
-  border-radius: 10px;
-  padding: 8px 11px;
-}
-.leadline-label {
-  font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--teal-deep);
-  margin-right: 6px;
-}
-.dxrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  text-align: left;
-  border: 1px solid var(--line-cool);
-  border-radius: 10px;
-  padding: 8px 11px;
-  font-size: 13.5px;
-  white-space: normal;
-}
-.dxrow.leading { border-color: var(--teal); background: var(--teal-soft); opacity: 1; }
-.dxrow .rank {
-  width: 22px;
-  height: 22px;
-  flex: 0 0 22px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-family: var(--serif);
-  font-weight: 700;
-  font-size: 12px;
-  color: #fff;
-  background: var(--ink);
-}
-.dxrow.leading .rank { background: var(--teal); }
-.dxrow .dx-name { font-family: var(--serif); font-weight: 700; font-size: 14px; }
-
-.opt { border: 1px solid var(--line-cool); border-radius: 11px; padding: 9px 12px; display: flex; flex-direction: column; gap: 4px; }
-.opt-head { display: flex; align-items: baseline; gap: 9px; }
-.opt .title { font-family: var(--serif); font-weight: 700; font-size: 14px; flex: 1; }
-.prio {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  border-radius: 999px;
-  padding: 2px 9px;
-  white-space: nowrap;
-}
-.prio.now { background: var(--teal); color: #fff; }
-.prio.next { border: 1px solid var(--teal); color: var(--teal-deep); }
-.prio.later { border: 1px solid var(--line); color: var(--muted); }
-.opt .purpose { font-size: 12.5px; color: var(--muted); }
-.opt .seq {
-  color: var(--brass);
-  font-size: 11.5px;
-  font-weight: 600;
-  background: var(--brass-soft);
-  border: 1px dashed rgba(150, 117, 31, 0.5);
-  border-radius: 8px;
-  padding: 3px 8px;
-  align-self: flex-start;
-}
-.opt .cov { font-size: 12px; color: var(--ink); }
-
-.chip {
-  display: inline-block;
-  font-size: 11px;
-  font-weight: 600;
-  border-radius: 999px;
-  padding: 2px 9px;
-  margin: 2px 4px 2px 0;
-  cursor: pointer;
-  background: var(--good-soft);
-  color: var(--good);
-  border: 1px solid rgba(30, 111, 66, 0.25);
-  transition: box-shadow 150ms ease-out;
-}
-.chip:hover { box-shadow: 0 1px 5px rgba(22, 35, 58, 0.15); }
-
-/* ---------- drawer ---------- */
+/* ---------- raw FHIR drawer ---------- */
 .drawer {
   position: fixed;
   right: 0;
   top: 0;
   bottom: 0;
   width: 480px;
+  max-width: 92vw;
   background: var(--panel);
   border-left: 1px solid var(--line);
   box-shadow: -8px 0 28px rgba(22, 35, 58, 0.14);
@@ -629,16 +655,17 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   z-index: 50;
 }
 .drawer h3 {
-  font-family: var(--serif);
-  font-size: 15px;
+  font-family: var(--mono);
+  font-size: 13px;
   letter-spacing: 0.02em;
   margin-bottom: 10px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--line);
 }
 .drawer pre {
-  font-size: 11.5px;
-  line-height: 1.5;
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.55;
   white-space: pre-wrap;
   word-break: break-all;
   background: #f4f2ea;
@@ -655,25 +682,29 @@ button.ghost:hover { color: var(--ink); box-shadow: none; border-color: var(--li
   padding: 10px 8px;
 }
 
-/* ---------- small screens: allow the page to scroll rather than crush ---------- */
+.chip {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  border-radius: 5px;
+  padding: 2px 7px;
+  margin: 2px 4px 2px 0;
+  cursor: pointer;
+  background: var(--good-soft);
+  color: var(--good);
+  border: 1px solid rgba(30, 111, 66, 0.25);
+}
+.chip:hover { box-shadow: 0 1px 5px rgba(22, 35, 58, 0.15); }
+
+/* ---------- small screens: let the page scroll rather than crush ---------- */
 @media (max-width: 1100px) {
   body { overflow: auto; }
   .app { height: auto; min-height: 100vh; }
   .main { grid-template-columns: 1fr; }
-  .rail { grid-column: 1; grid-row: 2; grid-template-rows: 420px; }
+  .rail { grid-column: 1; grid-row: 2; grid-template-rows: 380px; }
   .chamber { grid-column: 1; grid-row: 1; min-height: 70vh; }
-}
-
-/* your-move banner — the app must never look stuck while waiting on the clinician.
-   Lives at the top of Next steps; serif voice, same register as the leading line. */
-.yourmove {
-  font-family: var(--serif);
-  font-size: 13.5px;
-  font-weight: 700;
-  color: var(--teal-deep);
-  background: var(--teal-soft);
-  border: 1px solid rgba(15, 109, 118, 0.35);
-  border-radius: 10px;
-  padding: 9px 12px;
-  line-height: 1.45;
+  .seats { flex-wrap: wrap; }
+  .seat { flex: 0 1 104px; }
+  .seat-avatar { width: 44px; height: 44px; flex-basis: 44px; }
 }
