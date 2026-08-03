@@ -34,7 +34,7 @@ coding agent (Claude Code, Codex, Cursor, etc.) working in this repo.
   spin supporting states into separate dashboards.
 - **Integration status is literal.** `docs/PLAN-FINAL.md` records what is designed,
   verified, integrated, and demo-ready. Verified code so far: the Stedi standalone POC
-  and the voice-poc TTS/STT/Moss wiring; do not describe other provider paths as
+  and the voice-PoC TTS/STT/Moss wiring (PoC folders removed post-event; findings in docs/notes/); do not describe other provider paths as
   implemented until their stated proof succeeds.
 - Time-box any debugging spiral to 20 minutes, then simplify or stub.
 - On Vijay's machine, default `node` is v12 — prefix commands with

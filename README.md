@@ -25,7 +25,7 @@ live debate on Deepgram's managed model with code-enforced cited-or-conjecture �
 audible specialist voices + push-to-talk clinician mic → Moss semantic retrieval →
 one live Stedi test-mode eligibility check re-sequencing the plan → idempotent
 FHIR write-back (`ClinicalImpression` + draft `ServiceRequest`s) inspectable as raw
-JSON. Standalone PoCs that fed it: `stedi-poc/`, `voice-poc/`.
+JSON. (The standalone Stedi/voice PoCs that fed this build were removed from the repo post-event — their verified findings live in `docs/notes/` and inline code comments.)
 
 Run it:
 
