@@ -1,0 +1,465 @@
+/* The provider app — where the clinician already is when they need help.
+   Deliberately a DIFFERENT register from the consult room: this screen is all
+   record. Dense, tabular, monospaced numbers, no serif anywhere. The serif voice
+   belongs to the panel, so the type shifts the moment the argument starts.
+   Scoped as a CSS module so it can never collide with the consult room's lane. */
+
+.root {
+  --ehr-bg: #eef1f6;
+  --ehr-panel: #ffffff;
+  --ehr-ink: #16233a;
+  --ehr-muted: #64718a;
+  --ehr-line: #dbe2ec;
+  --ehr-rail: #1b2537;
+  --ehr-rail-ink: #9aa8c0;
+  --ehr-accent: #0f6d76;
+  --ehr-accent-soft: #e4f0f1;
+  --ehr-flag: #a53a40;
+  --ehr-flag-soft: #fbecec;
+  --ehr-good: #1e6f42;
+  --ehr-warn: #96751f;
+  --ehr-warn-soft: #f9f3e2;
+  --mono: ui-monospace, 'SF Mono', SFMono-Regular, Menlo, Consolas, monospace;
+
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--ehr-bg);
+  color: var(--ehr-ink);
+  font: 14px/1.5 -apple-system, 'Segoe UI', Roboto, Helvetica, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---------- rail ---------- */
+.rail {
+  background: var(--ehr-rail);
+  color: var(--ehr-rail-ink);
+  padding: 16px 12px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  padding: 0 6px;
+}
+.brandMark {
+  width: 25px;
+  height: 25px;
+  border-radius: 7px;
+  background: linear-gradient(140deg, #2f9ba6, #0f6d76);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+}
+.clinic {
+  font-size: 10.5px;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: #6d7d99;
+  padding: 4px 6px 16px 40px;
+}
+.railLabel {
+  font-size: 10px;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: #6d7d99;
+  padding: 14px 8px 6px;
+}
+.patientBtn {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--ehr-rail-ink);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font: inherit;
+  /* globals.css sets `button { white-space: nowrap }` for the consult room's
+     controls, and it reaches in here — the reason-for-visit needs to wrap. */
+  white-space: normal;
+  transition: background-color 140ms ease-out, color 140ms ease-out;
+}
+.patientBtn:hover { background: #24314a; color: #dce4f0; }
+.patientBtn[aria-current='true'] { background: #2c3b57; color: #fff; }
+.patientBtn:focus-visible { outline: 2px solid #3fa5b0; outline-offset: 1px; }
+.patientName {
+  font-size: 13.5px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Two lines of reason, then clamp — the rail is a list, not a summary. */
+.patientWhy {
+  font-size: 11px;
+  line-height: 1.35;
+  color: #7d8ca6;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.patientBtn[aria-current='true'] .patientWhy { color: #a9b8d0; }
+.navItem {
+  padding: 7px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #6d7d99;
+}
+
+/* ---------- main ---------- */
+.main {
+  padding: 20px 28px 48px;
+  max-width: 1180px;
+  min-width: 0;
+}
+.crumb {
+  font-size: 12px;
+  color: var(--ehr-muted);
+  margin-bottom: 12px;
+  font-family: var(--mono);
+}
+
+.banner {
+  background: var(--ehr-panel);
+  border: 1px solid var(--ehr-line);
+  border-radius: 12px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: var(--ehr-accent-soft);
+  color: var(--ehr-accent);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  flex: 0 0 auto;
+}
+.who { min-width: 0; flex: 1 1 260px; }
+.name {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.015em;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.synthetic {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: var(--ehr-warn-soft);
+  color: var(--ehr-warn);
+  border: 1px solid rgba(150, 117, 31, 0.3);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+.demographics {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ehr-muted);
+  margin-top: 5px;
+  line-height: 1.6;
+}
+.reason {
+  font-size: 13px;
+  color: var(--ehr-ink);
+  margin-top: 7px;
+  padding-left: 10px;
+  border-left: 2px solid var(--ehr-line);
+}
+
+/* The one moment on this screen that is not a record. */
+.convene {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  border: 0;
+  border-radius: 11px;
+  padding: 13px 22px;
+  background: var(--ehr-accent);
+  color: #fff;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow: 0 1px 0 #0b565e, 0 6px 18px rgba(15, 109, 118, 0.28);
+  transition: transform 130ms ease-out, box-shadow 130ms ease-out, background-color 130ms ease-out;
+}
+.convene:hover:not(:disabled) {
+  background: #0b565e;
+  transform: translateY(-1px);
+  box-shadow: 0 1px 0 #0b565e, 0 10px 24px rgba(15, 109, 118, 0.34);
+}
+.convene:active:not(:disabled) { transform: translateY(0); }
+.convene:focus-visible { outline: 2px solid var(--ehr-ink); outline-offset: 3px; }
+.convene:disabled { cursor: default; opacity: 0.9; }
+.conveneSub {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  opacity: 0.88;
+}
+
+/* ---------- cards ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.card {
+  background: var(--ehr-panel);
+  border: 1px solid var(--ehr-line);
+  border-radius: 12px;
+  overflow: hidden;
+  min-width: 0;
+}
+.cardHead {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 15px;
+  border-bottom: 1px solid #eef2f7;
+  background: #fafbfd;
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ehr-muted);
+}
+.count {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0;
+  color: #93a0b5;
+}
+.cardBody { padding: 6px 0; }
+.empty {
+  padding: 14px 15px;
+  font-size: 12.5px;
+  color: var(--ehr-muted);
+}
+
+/* problem / medication rows: name left, date right, aligned on the mono column */
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 7px 15px;
+  font-size: 13px;
+}
+.row + .row { border-top: 1px solid #f3f6fa; }
+.rowMain { flex: 1; min-width: 0; }
+.rowTitle { font-weight: 500; }
+.rowNote {
+  font-size: 11.5px;
+  color: var(--ehr-muted);
+  line-height: 1.45;
+  margin-top: 2px;
+}
+.rowDate {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ehr-muted);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+/* A newly started drug is the most consequential row on this screen. */
+.recent .rowTitle { color: var(--ehr-flag); font-weight: 700; }
+.recent .rowDate { color: var(--ehr-flag); }
+
+/* ---------- coverage ---------- */
+.benefitRow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 15px;
+  font-size: 13px;
+}
+.benefitRow + .benefitRow { border-top: 1px solid #f3f6fa; }
+.benefitLabel { color: var(--ehr-muted); font-size: 12.5px; }
+.benefitValue {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ehr-good);
+}
+.dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.payerMsg {
+  padding: 9px 15px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ehr-warn);
+  background: var(--ehr-warn-soft);
+  border-top: 1px solid rgba(150, 117, 31, 0.2);
+}
+.pending {
+  padding: 14px 15px;
+  font-size: 12.5px;
+  color: var(--ehr-muted);
+  font-family: var(--mono);
+}
+
+/* ---------- panel preview ---------- */
+.preview {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 7px;
+  padding: 12px 15px;
+}
+.previewChip {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border: 1px solid var(--ehr-line);
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: #fbfcfe;
+  min-width: 0;
+}
+.previewName {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+}
+.previewWhy {
+  font-size: 10.5px;
+  color: var(--ehr-muted);
+  line-height: 1.35;
+}
+/* An expertise the bench cannot supply is shown here, before anyone convenes. */
+.previewChip.gap {
+  border-style: dashed;
+  border-color: rgba(165, 58, 64, 0.45);
+  background: var(--ehr-flag-soft);
+}
+.previewChip.gap .previewName { color: var(--ehr-flag); }
+.previewFoot {
+  padding: 0 15px 12px;
+  font-size: 11.5px;
+  color: var(--ehr-muted);
+  line-height: 1.5;
+}
+
+/* ---------- timeline ---------- */
+.timeline { margin-top: 14px; }
+.tlRow {
+  display: grid;
+  grid-template-columns: 96px 132px minmax(0, 1fr);
+  gap: 14px;
+  padding: 7px 15px;
+  font-size: 12.5px;
+  align-items: baseline;
+}
+.tlRow + .tlRow { border-top: 1px solid #f3f6fa; }
+.tlDate {
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--ehr-muted);
+  font-variant-numeric: tabular-nums;
+}
+.tlType {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  color: var(--ehr-accent);
+  text-transform: uppercase;
+}
+.tlText { min-width: 0; line-height: 1.5; }
+
+.foot {
+  text-align: center;
+  color: #8593a9;
+  font-size: 11.5px;
+  padding: 22px 8px 0;
+  line-height: 1.6;
+}
+.error {
+  margin-top: 14px;
+  background: var(--ehr-flag-soft);
+  border: 1px solid rgba(165, 58, 64, 0.3);
+  color: var(--ehr-flag);
+  border-radius: 10px;
+  padding: 11px 14px;
+  font-size: 13px;
+}
+
+/* ---------- convening overlay: the handoff into the room ---------- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(11, 18, 30, 0.86);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  color: #eef3fa;
+  text-align: center;
+  padding: 24px;
+}
+.overlayText {
+  font-size: 15px;
+  letter-spacing: 0.02em;
+}
+.overlaySub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: #8fa3bd;
+  margin-top: 8px;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .overlay { animation: fade 260ms ease-out; }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+}
+
+@media (max-width: 860px) {
+  .root { grid-template-columns: 1fr; }
+  .rail { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .clinic, .railLabel, .navItem { display: none; }
+  .patientBtn { width: auto; }
+  .main { padding: 16px; }
+  .tlRow { grid-template-columns: 88px minmax(0, 1fr); }
+  .tlType { display: none; }
+}

@@ -13,3 +13,6 @@ scripts/out/
 tsconfig.tsbuildinfo
 .tsbuildinfo
 Screen Recording*.mov
+
+# local screenshot/debug scratch
+.playwright-mcp/

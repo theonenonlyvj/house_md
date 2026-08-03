@@ -1,12 +1,13 @@
 import { fhirRead, fhirSearch } from './medplum';
-import { DEFAULT_CASE } from '../case/default-case';
+import type { CaseConfig } from '../case/cases';
 import type { EvidenceRef, PatientBanner } from '../shared/types';
 import type { ChartResourceLite } from '../council/seating';
 
-// Loads the case patient's chart from hosted Medplum and builds the alias table
+// Loads a case patient's chart from hosted Medplum and builds the alias table
 // (E1, E2, …) — the model only ever cites aliases; the server resolves them.
 
 export interface LoadedChart {
+  caseId: string;
   banner: PatientBanner;
   patientId: string;
   age: number;
@@ -26,20 +27,66 @@ const EVIDENCE_TYPES = [
   'AllergyIntolerance',
   'Encounter',
   'Immunization',
+  // Orders that were placed and never completed are some of the most diagnostic
+  // rows in a chart — a referral nobody attended, a study nobody ran. Omitting
+  // ServiceRequest hid exactly the kind of gap the panel is here to notice.
+  'ServiceRequest',
 ];
 
+const cc = (c: any): string =>
+  c?.text || c?.coding?.map((x: any) => x.display).filter(Boolean).join(' ') || '';
+
+// Seeded records carry a synthetic-data disclaimer in note[]. It is honest
+// provenance in FHIR and pure noise everywhere else — it would repeat on every row
+// on screen and eat the model's context on every search hit. Strip it here, once.
+const BOILERPLATE = /Synthetic demo record\.\s*Terminology coding intentionally omitted[^.]*\.\s*/gi;
+const clean = (s: string) =>
+  s
+    .replace(BOILERPLATE, '')
+    .replace(/\s+/g, ' ')
+    // removing a trailing segment leaves its " — " joiner dangling
+    .replace(/(\s*—\s*)+$/, '')
+    .replace(/\s*—\s*—\s*/g, ' — ')
+    .trim();
+
+/** The resource's name, for a chart row or a card heading. */
+function titleOf(r: any): string {
+  const named =
+    cc(r.code) ||
+    cc(r.medicationCodeableConcept) ||
+    cc(r.type?.[0]) ||
+    cc(r.category?.[0]) ||
+    r.resourceType;
+  return clean(named).slice(0, 110);
+}
+
+/** Everything the resource says, for retrieval and citation. */
 function textOf(r: any): string {
   const bits: string[] = [];
-  const cc = (c: any) => c?.text || c?.coding?.map((x: any) => x.display).filter(Boolean).join(' ');
-  bits.push(cc(r.code) || '');
+  bits.push(titleOf(r));
   bits.push(r.valueString || cc(r.valueCodeableConcept) || '');
   if (r.valueQuantity) bits.push(`${r.valueQuantity.value ?? ''} ${r.valueQuantity.unit ?? ''}`);
+  if (Array.isArray(r.dosageInstruction)) bits.push(r.dosageInstruction.map((d: any) => d.text).filter(Boolean).join('; '));
   bits.push(cc(r.reasonCode?.[0]) || '');
   bits.push(r.conclusion || '');
+  if (r.interpretation?.[0]) bits.push(`FLAGGED ${cc(r.interpretation[0])}`);
   if (Array.isArray(r.note)) bits.push(r.note.map((n: any) => n.text).join(' '));
-  if (r.performedDateTime) bits.push(r.performedDateTime);
-  if (r.effectiveDateTime) bits.push(r.effectiveDateTime);
-  return bits.filter(Boolean).join(' — ');
+  if (r.status && ['revoked', 'draft', 'completed'].includes(r.status)) bits.push(`status: ${r.status}`);
+  return clean(bits.filter(Boolean).join(' — '));
+}
+
+/** Effective date across the resource types we load. */
+function dateOf(r: any): string | undefined {
+  return (
+    r.performedDateTime ||
+    r.effectiveDateTime ||
+    r.authoredOn || // MedicationRequest, ServiceRequest — was missing, so both showed no date
+    r.recordedDate ||
+    r.onsetDateTime ||
+    r.period?.start ||
+    r.occurrenceDateTime ||
+    undefined
+  );
 }
 
 function ageFrom(dob?: string): number {
@@ -65,15 +112,18 @@ const DEV_CHART: { patient: any; resources: any[] } = {
   ],
 };
 
-let cached: LoadedChart | null = null;
+// One chart per case, so switching patients on the provider page does not serve a
+// stale record — and switching back does not re-fetch a decade of history.
+const cache = new Map<string, LoadedChart>();
 
-export function resetChartCache(): void {
-  cached = null;
+export function resetChartCache(caseId?: string): void {
+  if (caseId) cache.delete(caseId);
+  else cache.clear();
 }
 
-export async function loadChart(force = false): Promise<LoadedChart> {
-  if (cached && !force) return cached;
-  const cfg = DEFAULT_CASE;
+export async function loadChart(cfg: CaseConfig, force = false): Promise<LoadedChart> {
+  const hit = cache.get(cfg.id);
+  if (hit && !force) return hit;
   let patient: any | null = null;
   let source: 'medplum' | 'dev-local' = 'medplum';
   let resources: any[] = [];
@@ -114,13 +164,14 @@ export async function loadChart(force = false): Promise<LoadedChart> {
     alias: `E${i + 1}`,
     resourceType: r.resourceType,
     resourceId: r.id,
-    display: (textOf(r) || r.resourceType).slice(0, 90),
-    fact: textOf(r).slice(0, 240),
-    date: r.performedDateTime || r.effectiveDateTime || r.recordedDate || r.period?.start || r.occurrenceDateTime || undefined,
+    display: titleOf(r) || r.resourceType,
+    fact: textOf(r).slice(0, 300),
+    date: dateOf(r),
   }));
 
   const name = patient.name?.[0];
-  cached = {
+  const loaded: LoadedChart = {
+    caseId: cfg.id,
     banner: {
       name: `${name?.given?.join(' ') ?? ''} ${name?.family ?? ''}`.trim() || 'Synthetic Patient',
       dob: patient.birthDate || 'unknown',
@@ -135,7 +186,8 @@ export async function loadChart(force = false): Promise<LoadedChart> {
     aliases,
     source,
   };
-  return cached;
+  cache.set(cfg.id, loaded);
+  return loaded;
 }
 
 // Keyword-scored evidence search over the alias table (honest local retrieval; the
