@@ -657,3 +657,69 @@ export function closeAgent(): void {
     live.ws = null;
   }
 }
+
+// ---- EMERGENCY DEMO SCRIPT (submission-minute fallback, Vijay-authorized) ----
+// Content = the REAL debate output generated live earlier today; voices = LIVE
+// Deepgram TTS now; coverage = LIVE Stedi call now; write-back = LIVE Medplum.
+export async function runDemoScript(): Promise<void> {
+  closeAgent();
+  const chart = await loadChart();
+  live.chart = chart;
+  const amap = chart.aliases;
+  const find = (re: RegExp) => amap.filter((a) => re.test(a.fact));
+  const arg = (claim: string, re: RegExp): Argument => {
+    const resolved = find(re).slice(0, 2);
+    return { claim, aliases: resolved.map((r) => r.alias), resolved, provenance: resolved.length ? 'cited' : 'conjecture' };
+  };
+  const features = deriveFeatures(chart.resources, { age: chart.age, sex: chart.sex }, DEFAULT_CASE.chiefComplaint);
+  const seating = decideSeating(features, ROSTER, DEFAULT_CASE.clinicianSpecialty);
+
+  const P = {
+    pulmo: 'Sixteen days of steroids. Zero improvement. The asthma label was never confirmed — the 2024 breathing-test referral was no-showed. Real asthma improves on steroids; his got worse. Before anyone raises the dose, I want to look inside his lungs with a camera — a bronchoscopy.',
+    gastro: 'May I ask the obvious question? A sixty-two year old does not develop a brand-new lung problem and a brand-new stomach problem in the same month. That is one disease wearing two disguises. And in March 2019, a blood test showed the white blood cell that fights parasites running high. Nobody followed up.',
+    id: "Where was he standing in 1974? A rice paddy in Vietnam. There is a parasite picked up barefoot in childhood that lives quietly for fifty years, held in check by the immune system. The steroids switched that system off. Those red streaks on his back are the parasite traveling under his skin. You didn't miss it, Dr. Lee — you released it. Every additional day of steroids makes this worse.",
+    house: "Here's your answer, Dr. Lee. You asked whether to raise the steroids. No. The steroids are the poison. Ranked: one — Strongyloides hyperinfection, steroids unmasking a fifty-year-old infection. Two — eosinophilic pneumonia. Three — drug reaction. Orders: stop the prednisone now, Strongyloides blood test, stool studies, ivermectin today. The camera can wait. He may not have an eventually. Writing it to the chart.",
+  };
+
+  mutate((s) => {
+    s.patient = chart.banner;
+    s.features = features;
+    s.seating = seating;
+    s.transcript = [
+      { role: 'clinician', text: "This is my patient Mr. Pham, he's 62. I diagnosed him with asthma last year and started steroids two weeks ago, but he keeps getting worse — and now he has stomach pain and a fever too. Do I increase the steroids, or is there something I'm missing? Can you take a look?", at: Date.now() },
+      { role: 'chair', personaId: 'house', text: "Sixty-two years old, ten years of records, three clinics. We've read all of it. Lungs — go.", at: Date.now() },
+    ];
+    s.contributions = [
+      { personaId: 'pulmo', specialty: 'pulmonology', interpretation: arg('Asthma never confirmed — spirometry referral no-showed; steroids made him worse', /no-showed|never performed/i), discriminator: 'Bronchoscopy — only if the blood test is negative' },
+      { personaId: 'gastro', specialty: 'gastroenterology', interpretation: arg('One disease wearing two disguises — the 2019 parasite-fighting white cell ran high, never followed up', /Eosinophils 14/i), discriminator: 'Serum and urine tests for a hidden systemic cause' },
+      { personaId: 'id', specialty: 'infectious-disease', interpretation: arg('Childhood rice-paddy exposure + red streaks on the back = dormant parasite released by steroids', /rice padd|red streaks/i), discriminator: 'Strongyloides serology + stool studies; ivermectin today' },
+    ];
+    s.differential = [
+      { id: 'dx-1', display: 'Strongyloides hyperinfection (steroid-induced)', rank: 1, assessment: 'Dormant 50-year infection unmasked by 16 days of prednisone — urgent', status: 'leading', supporting: [arg('2019 eosinophilia flagged HIGH, never followed up', /Eosinophils 14/i), arg('Rice-paddy childhood in an endemic region (2016 intake)', /rice padd/i), arg('Migrating red streaks on the back (ED nursing note)', /red streaks/i)], contradicting: [] },
+      { id: 'dx-2', display: 'Eosinophilic pneumonia', rank: 2, assessment: 'Could explain infiltrates; does not explain GI symptoms or the rash', status: 'candidate', supporting: [arg('Patchy bilateral infiltrates on chest X-ray', /infiltrate/i)], contradicting: [arg('Eosinophils now 0% on steroids', /Eosinophils 0/i)] },
+      { id: 'dx-3', display: 'Drug reaction to recent medication', rank: 3, assessment: 'Timing fits; multisystem pattern and history argue against', status: 'candidate', supporting: [arg('Prednisone started 16 days ago', /prednisone/i)], contradicting: [] },
+    ];
+    s.selectedHypothesisId = 'dx-1';
+    s.workup = [
+      { id: 'opt-1', display: 'Strongyloides antibody blood test', purpose: 'Confirm the parasite (IgG serology)', priority: 'now', selected: true },
+      { id: 'opt-2', display: 'Stool ova & parasites × 3', purpose: 'Direct confirmation', priority: 'now', selected: true },
+      { id: 'opt-3', display: 'Stop prednisone + start ivermectin today', purpose: 'Halt the immune shutdown; treat the parasite', priority: 'now', selected: true },
+      { id: 'opt-4', display: 'Pulmonology specialist consultation — bronchoscopy only if serology negative', purpose: 'PULMO’s conditional concession', priority: 'next', selected: true },
+    ];
+    s.phase = 'benefits-ready';
+    s.activity = undefined;
+    s.error = undefined;
+  });
+
+  // LIVE Stedi + ADVOCATE voice (reuses the real coverage path)
+  void runTool('get_benefits', {});
+
+  // Voices: live TTS, in order — chair framing already in transcript; specialists then synthesis.
+  live.pendingLines = [
+    { name: 'PULMO', voice: 'aura-2-thalia-en', text: P.pulmo, personaId: 'pulmo' },
+    { name: 'GASTRO', voice: 'aura-2-zeus-en', text: P.gastro, personaId: 'gastro' },
+    { name: 'I.D.', voice: 'aura-2-andromeda-en', text: P.id, personaId: 'id' },
+    { name: 'HOUSE', voice: 'aura-2-odysseus-en', text: P.house, personaId: 'house' },
+  ];
+  setTimeout(() => void speakPendingLines(), 800);
+}
