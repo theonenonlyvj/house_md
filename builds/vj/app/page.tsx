@@ -602,7 +602,13 @@ export default function Page() {
               {visibleTurns.map((t, i) => (
                 <div
                   key={i}
-                  className={`turn ${t.role}${t.personaId && s.speakingPersonaId === t.personaId ? ' speaking' : ''}`}
+                  // Only the LAST turn can be the one being spoken. Matching on
+                  // personaId alone lit up every past turn by the same voice.
+                  className={`turn ${t.role}${
+                    i === visibleTurns.length - 1 && t.personaId && s.speakingPersonaId === t.personaId
+                      ? ' speaking'
+                      : ''
+                  }`}
                 >
                   <div className="turn-who">{whoFor(t)}</div>
                   <div className="turn-said">{saidFor(t)}</div>

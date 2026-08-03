@@ -27,6 +27,10 @@ const EVIDENCE_TYPES = [
   'AllergyIntolerance',
   'Encounter',
   'Immunization',
+  // Orders that were placed and never completed are some of the most diagnostic
+  // rows in a chart — a referral nobody attended, a study nobody ran. Omitting
+  // ServiceRequest hid exactly the kind of gap the panel is here to notice.
+  'ServiceRequest',
 ];
 
 const cc = (c: any): string =>
